@@ -2,7 +2,7 @@ import { Card, CardBody, CardFooter, Button, Tooltip } from '@nextui-org/react';
 import { appWindow } from '@tauri-apps/api/window';
 import React, { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { MdContentCopy } from 'react-icons/md';
+import { LuCopy } from 'react-icons/lu';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api';
 import { atom, useAtom } from 'jotai';
@@ -72,7 +72,7 @@ export default function ImageArea() {
                             });
                         }}
                     >
-                        <MdContentCopy className='text-[16px]' />
+                        <LuCopy className='text-[16px]' />
                     </Button>
                 </Tooltip>
             </CardFooter>

@@ -1,7 +1,7 @@
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from '@nextui-org/react';
 import { Table, TableHeader, TableColumn, TableBody, TableRow, TableCell } from '@nextui-org/react';
 import { readDir, BaseDirectory, readTextFile, exists } from '@tauri-apps/api/fs';
-import { Textarea, Button, ButtonGroup } from '@nextui-org/react';
+import { Textarea, Button } from '@nextui-org/react';
 import { appConfigDir, join } from '@tauri-apps/api/path';
 import { convertFileSrc } from '@tauri-apps/api/tauri';
 import React, { useEffect, useState } from 'react';
@@ -281,7 +281,7 @@ export default function History() {
                                         >
                                             {t('common.save')}
                                         </Button>
-                                        <ButtonGroup>
+                                        <div className='flex items-center gap-[2px] [&_button]:!rounded-full [&_button]:!text-default-500 [&_button]:data-[hover=true]:!bg-content2'>
                                             {collectionServiceList &&
                                                 collectionServiceList.map((instanceKey) => {
                                                     return (
@@ -367,7 +367,7 @@ export default function History() {
                                                         </Button>
                                                     );
                                                 })}
-                                        </ButtonGroup>
+                                        </div>
                                     </ModalFooter>
                                 </>
                             )

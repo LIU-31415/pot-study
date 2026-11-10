@@ -1,6 +1,6 @@
 import { INSTANCE_NAME_CONFIG_KEY } from '../../../utils/service_instance';
 import { Input, Button, Switch, Textarea } from '@nextui-org/react';
-import { MdDeleteOutline } from 'react-icons/md';
+import { LuTrash2 } from 'react-icons/lu';
 import toast, { Toaster } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { open } from '@tauri-apps/api/shell';
@@ -178,7 +178,7 @@ export function Config(props) {
                 <h3 className='my-auto'>Prompt List</h3>
                 <p className='text-[10px] text-default-700'>{t('services.translate.geminipro.prompt_description')}</p>
 
-                <div className='bg-content2 rounded-[10px] p-3'>
+                <div className='bg-content2 rounded-[14px] p-3'>
                     {serviceConfig.promptList &&
                         serviceConfig.promptList.map((prompt, index) => {
                             return (
@@ -221,7 +221,7 @@ export function Config(props) {
                                             });
                                         }}
                                     >
-                                        <MdDeleteOutline className='text-[18px]' />
+                                        <LuTrash2 className='text-[18px]' />
                                     </Button>
                                 </div>
                             );

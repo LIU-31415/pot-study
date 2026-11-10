@@ -1,11 +1,9 @@
-import { Card, CardBody, CardFooter, Button, Skeleton, ButtonGroup, Tooltip } from '@nextui-org/react';
+import { Card, CardBody, CardFooter, Button, Skeleton, Tooltip } from '@nextui-org/react';
 import { sendNotification } from '@tauri-apps/api/notification';
 import { writeText } from '@tauri-apps/api/clipboard';
 import { atom, useAtom, useAtomValue } from 'jotai';
 import React, { useEffect, useState } from 'react';
-import { CgSpaceBetween } from 'react-icons/cg';
-import { MdContentCopy } from 'react-icons/md';
-import { MdSmartButton } from 'react-icons/md';
+import { LuCopy, LuSpace, LuWrapText } from 'react-icons/lu';
 import { useTranslation } from 'react-i18next';
 import { nanoid } from 'nanoid';
 
@@ -175,7 +173,7 @@ export default function TextArea(props) {
                 )}
             </CardBody>
             <CardFooter className='bg-content1 flex justify-start px-[12px]'>
-                <ButtonGroup>
+                <div className='flex items-center gap-[2px] [&_button]:!rounded-full [&_button]:!text-default-500 [&_button]:data-[hover=true]:!bg-content2'>
                     <Tooltip content={t('recognize.copy_text')}>
                         <Button
                             isIconOnly
@@ -185,7 +183,7 @@ export default function TextArea(props) {
                                 writeText(text);
                             }}
                         >
-                            <MdContentCopy className='text-[16px]' />
+                            <LuCopy className='text-[16px]' />
                         </Button>
                     </Tooltip>
                     <Tooltip content={t('recognize.delete_newline')}>
@@ -197,7 +195,7 @@ export default function TextArea(props) {
                                 setText(text.replace(/\-\s+/g, '').replace(/\s+/g, ' '));
                             }}
                         >
-                            <MdSmartButton className='text-[16px]' />
+                            <LuWrapText className='text-[16px]' />
                         </Button>
                     </Tooltip>
                     <Tooltip content={t('recognize.delete_space')}>
@@ -209,10 +207,10 @@ export default function TextArea(props) {
                                 setText(text.replaceAll(' ', ''));
                             }}
                         >
-                            <CgSpaceBetween className='text-[16px]' />
+                            <LuSpace className='text-[16px]' />
                         </Button>
                     </Tooltip>
-                </ButtonGroup>
+                </div>
             </CardFooter>
         </Card>
     );

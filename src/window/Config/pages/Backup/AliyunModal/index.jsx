@@ -1,6 +1,6 @@
 import { Modal, ModalContent, ModalHeader, ModalBody, Button, Skeleton } from '@nextui-org/react';
 import React, { useEffect, useState } from 'react';
-import { MdDeleteOutline } from 'react-icons/md';
+import { LuTrash2 } from 'react-icons/lu';
 import toast, { Toaster } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 
@@ -126,7 +126,7 @@ export default function AliyunModal(props) {
                                                         );
                                                     }}
                                                 >
-                                                    <MdDeleteOutline className='text-xl' />
+                                                    <LuTrash2 className='text-xl' />
                                                 </Button>
                                             </div>
                                         );

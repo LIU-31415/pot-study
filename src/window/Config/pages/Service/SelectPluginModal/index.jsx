@@ -2,7 +2,7 @@ import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Button } from
 import { removeDir, BaseDirectory } from '@tauri-apps/api/fs';
 import { open as openInBrowser } from '@tauri-apps/api/shell';
 import toast, { Toaster } from 'react-hot-toast';
-import { MdDeleteOutline } from 'react-icons/md';
+import { LuTrash2 } from 'react-icons/lu';
 import { useTranslation } from 'react-i18next';
 import { open } from '@tauri-apps/api/dialog';
 import { invoke } from '@tauri-apps/api';
@@ -86,7 +86,7 @@ export default function SelectPluginModal(props) {
                                                 );
                                             }}
                                         >
-                                            <MdDeleteOutline className='text-xl' />
+                                            <LuTrash2 className='text-xl' />
                                         </Button>
                                     </div>
                                 );

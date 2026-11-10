@@ -1,6 +1,6 @@
 import { Card, Button, CardFooter, Dropdown, DropdownMenu, DropdownTrigger, DropdownItem } from '@nextui-org/react';
 import { useTranslation } from 'react-i18next';
-import { BiTransferAlt } from 'react-icons/bi';
+import { LuArrowLeftRight } from 'react-icons/lu';
 import React, { useEffect } from 'react';
 import { atom, useAtom, useAtomValue } from 'jotai';
 
@@ -41,9 +41,9 @@ export default function LanguageArea() {
     return (
         <Card
             shadow='none'
-            className='bg-content2 h-[35px] rounded-[10px]'
+            className='bg-content2 h-[35px] rounded-[14px]'
         >
-            <CardFooter className='bg-content2 flex justify-between p-0 rounded-[10px]'>
+            <CardFooter className='bg-content2 flex justify-between p-0 rounded-[14px]'>
                 <div className='flex'>
                     <Dropdown>
                         <DropdownTrigger>
@@ -96,7 +96,7 @@ export default function LanguageArea() {
                             }
                         }}
                     >
-                        <BiTransferAlt />
+                        <LuArrowLeftRight />
                     </Button>
                 </div>
                 <div className='flex'>

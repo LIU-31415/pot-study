@@ -57,7 +57,7 @@ export default function Updater() {
     return (
         <div
             className={`${transparent ? 'bg-background/90' : 'bg-background'} h-screen ${
-                osType === 'Linux' && 'rounded-[10px] border-1 border-default-100'
+                osType === 'Linux' && 'rounded-[14px] border-1 border-default-100'
             }`}
         >
             <Toaster />

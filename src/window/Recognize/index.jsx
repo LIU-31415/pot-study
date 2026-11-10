@@ -5,7 +5,7 @@ import { appWindow } from '@tauri-apps/api/window';
 import React, { useState, useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { Button } from '@nextui-org/react';
-import { BsPinFill } from 'react-icons/bs';
+import { LuPin } from 'react-icons/lu';
 import { atom, useAtom } from 'jotai';
 
 import WindowControl from '../../components/WindowControl';
@@ -106,8 +106,8 @@ export default function Recognize() {
         pluginList &&
         serviceInstanceConfigMap !== null && (
             <div
-                className={`bg-background h-screen ${
-                    osType === 'Linux' && 'rounded-[10px] border-1 border-default-100'
+                className={`window-enter bg-background h-screen ${
+                    osType === 'Linux' && 'rounded-[14px] border-1 border-default-100'
                 }`}
             >
                 <div
@@ -134,7 +134,7 @@ export default function Recognize() {
                             setPined(!pined);
                         }}
                     >
-                        <BsPinFill className={`text-[20px] ${pined ? 'text-primary' : 'text-default-400'}`} />
+                        <LuPin className={`text-[20px] ${pined ? 'text-primary' : 'text-default-400'}`} />
                     </Button>
                     {osType !== 'Darwin' && <WindowControl />}
                 </div>
