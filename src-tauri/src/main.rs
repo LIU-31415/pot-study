@@ -91,7 +91,7 @@ fn main() {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
             if follow_system {
-                let on = sync_system_proxy().unwrap_or(false);
+                let on = sync_system_proxy_blocking().unwrap_or(false);
                 info!("Proxy: follow system = {}", on);
             } else {
                 let manual = get("proxy_enable")

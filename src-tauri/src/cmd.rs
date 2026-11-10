@@ -150,47 +150,47 @@ pub fn unset_proxy() -> Result<bool, ()> {
     Ok(true)
 }
 
-/// 读 Windows 系统代理设置（分流软件开关控制的就是它）
+/// 读 Windows 系统代理设置（分流软件开关控制的就是它）。
+/// 一次查询拿整个键，不分开查 ProxyEnable / ProxyServer：
+/// 每次启动 reg.exe 要几十到几百毫秒，两次叠加就是能感觉到的卡顿。
 #[cfg(target_os = "windows")]
 fn read_system_proxy() -> Option<String> {
     use std::process::Command;
     let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
 
-    let enable = Command::new("reg")
-        .args(["query", key, "/v", "ProxyEnable"])
-        .output()
-        .ok()?;
-    let es = String::from_utf8_lossy(&enable.stdout);
-    // 输出形如: "    ProxyEnable    REG_DWORD    0x1"
-    if !es.contains("0x1") {
-        return None;
-    }
+    let out = Command::new("reg").args(["query", key]).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
 
-    let server = Command::new("reg")
-        .args(["query", key, "/v", "ProxyServer"])
-        .output()
-        .ok()?;
-    let ss = String::from_utf8_lossy(&server.stdout);
-    for line in ss.lines() {
-        if let Some(pos) = line.find("REG_SZ") {
-            let v = line[pos + 6..].trim();
-            if v.is_empty() {
-                continue;
-            }
-            // 可能是 "127.0.0.1:10808" 或 "http=...;https=..."，取第一个
-            let first = v.split(';').next().unwrap_or(v).trim();
-            let addr = first.rsplit('=').next().unwrap_or(first).trim();
-            if addr.contains(':') {
-                return Some(addr.to_string());
+    let mut enabled = false;
+    let mut server = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("ProxyEnable") {
+            // 形如 "ProxyEnable    REG_DWORD    0x1"，按字段精确比对，
+            // 不用 contains：0x10 这类值会被误判成开启
+            enabled = rest.split_whitespace().any(|t| t.eq_ignore_ascii_case("0x1"));
+        } else if let Some(rest) = line.strip_prefix("ProxyServer") {
+            if let Some(pos) = rest.find("REG_SZ") {
+                server = rest[pos + 6..].trim().to_string();
             }
         }
     }
-    None
+    if !enabled || server.is_empty() {
+        return None;
+    }
+    // 可能是 "127.0.0.1:10808" 或 "http=...;https=..."，取第一个
+    let first = server.split(';').next().unwrap_or(&server).trim();
+    let addr = first.rsplit('=').next().unwrap_or(first).trim();
+    if addr.contains(':') {
+        Some(addr.to_string())
+    } else {
+        None
+    }
 }
 
-/// 跟随系统代理：系统开了就用它，关了就不走代理
-#[tauri::command]
-pub fn sync_system_proxy() -> Result<bool, ()> {
+/// 跟随系统代理：系统开了就用它，关了就不走代理。
+/// 阻塞实现，供启动阶段和异步命令共用。
+pub fn sync_system_proxy_blocking() -> Result<bool, ()> {
     #[cfg(target_os = "windows")]
     {
         match read_system_proxy() {
@@ -222,6 +222,15 @@ pub fn sync_system_proxy() -> Result<bool, ()> {
     #[cfg(not(target_os = "windows"))]
     {
         Ok(false)
+    }
+}
+
+/// 前端入口：放到阻塞线程池里跑，不占主线程，开关点下去界面不会卡。
+#[tauri::command]
+pub async fn sync_system_proxy() -> Result<bool, ()> {
+    match tauri::async_runtime::spawn_blocking(sync_system_proxy_blocking).await {
+        Ok(r) => r,
+        Err(_) => Err(()),
     }
 }
 
