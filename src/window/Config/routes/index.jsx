@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom';
 
 import Translate from '../pages/Translate';
+import Study from '../pages/Study';
 import Recognize from '../pages/Recognize';
 import General from '../pages/General';
 import Service from '../pages/Service';
@@ -17,6 +18,10 @@ const routes = [
     {
         path: '/translate',
         element: <Translate />,
+    },
+    {
+        path: '/study',
+        element: <Study />,
     },
     {
         path: '/recognize',
@@ -49,3 +54,7 @@ const routes = [
 ];
 
 export default routes;
+
+
+
+

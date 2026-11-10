@@ -47,6 +47,10 @@ const keyMap = {
 
 export default function Hotkey() {
     const [selectionTranslate, setSelectionTranslate] = useConfig('hotkey_selection_translate', '');
+    const [selectionTranslateStudy, setSelectionTranslateStudy] = useConfig(
+        'hotkey_selection_translate_study',
+        ''
+    );
     const [inputTranslate, setInputTranslate] = useConfig('hotkey_input_translate', '');
     const [ocrRecognize, setOcrRecognize] = useConfig('hotkey_ocr_recognize', '');
     const [ocrTranslate, setOcrTranslate] = useConfig('hotkey_ocr_translate', '');
@@ -140,6 +144,40 @@ export default function Hotkey() {
                                     className={`${selectionTranslate === '' && 'hidden'}`}
                                     onPress={() => {
                                         registerHandler('hotkey_selection_translate', selectionTranslate);
+                                    }}
+                                >
+                                    {t('common.ok')}
+                                </Button>
+                            }
+                        />
+                    )}
+                </div>
+                <div className='config-item'>
+                    <h3 className='my-auto'>{t('config.hotkey.selection_translate_study')}</h3>
+                    {selectionTranslateStudy !== null && (
+                        <Input
+                            type='hotkey'
+                            variant='bordered'
+                            value={selectionTranslateStudy}
+                            label={t('config.hotkey.set_hotkey')}
+                            className='max-w-[50%]'
+                            onKeyDown={(e) => {
+                                keyDown(e, setSelectionTranslateStudy);
+                            }}
+                            onFocus={() => {
+                                unregister(selectionTranslateStudy);
+                                setSelectionTranslateStudy('');
+                            }}
+                            endContent={
+                                <Button
+                                    size='sm'
+                                    variant='flat'
+                                    className={`${selectionTranslateStudy === '' && 'hidden'}`}
+                                    onPress={() => {
+                                        registerHandler(
+                                            'hotkey_selection_translate_study',
+                                            selectionTranslateStudy
+                                        );
                                     }}
                                 >
                                     {t('common.ok')}

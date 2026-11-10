@@ -1,6 +1,7 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { BsInfoSquareFill } from 'react-icons/bs';
 import { PiTranslateFill } from 'react-icons/pi';
+import { PiBookOpenTextFill } from 'react-icons/pi';
 import { AiFillAppstore } from 'react-icons/ai';
 import { useTranslation } from 'react-i18next';
 import { PiTextboxFill } from 'react-icons/pi';
@@ -45,6 +46,18 @@ export default function SideBar() {
                 startContent={<PiTranslateFill className='text-[24px]' />}
             >
                 <div className='w-full'>{t('config.translate.label')}</div>
+            </Button>
+            <Button
+                fullWidth
+                size='lg'
+                variant={setStyle('/study')}
+                className='mb-[5px]'
+                onPress={() => {
+                    navigate('/study');
+                }}
+                startContent={<PiBookOpenTextFill className='text-[24px]' />}
+            >
+                <div className='w-full'>{t('config.study.label')}</div>
             </Button>
             <Button
                 fullWidth

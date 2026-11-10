@@ -2,7 +2,7 @@
     "build": {
         "beforeDevCommand": "pnpm dev",
         "beforeBuildCommand": "pnpm build",
-        "devPath": "http://localhost:1420",
+        "devPath": "http://127.0.0.1:1420",
         "distDir": "../dist",
         "withGlobalTauri": false
     },
@@ -117,7 +117,7 @@
             }
         ],
         "systemTray": {
-            "iconPath": "icons/icon.png",
+            "iconPath": "icons/tray.png",
             "iconAsTemplate": true
         },
         "updater": {

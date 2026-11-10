@@ -8,10 +8,13 @@ import WindowControl from '../../components/WindowControl';
 import SideBar from './components/SideBar';
 import { osType } from '../../utils/env';
 import { useConfig } from '../../hooks';
+import { useStudySyncEngine } from '../../hooks/useStudySyncEngine';
 import routes from './routes';
 import './style.css';
 
 export default function Config() {
+    // 学习模式 × 翻译模式 双向同步引擎（幂等，开关默认关闭）
+    useStudySyncEngine();
     const [transparent] = useConfig('transparent', true);
     const { t } = useTranslation();
     const location = useLocation();
@@ -43,7 +46,7 @@ export default function Config() {
                     <div data-tauri-drag-region='true'>
                         <img
                             alt='pot logo'
-                            src='icon.svg'
+                            src='icon.png'
                             className='h-[60px] w-[60px] m-auto mb-[30px]'
                             draggable={false}
                         />

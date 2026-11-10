@@ -14,6 +14,11 @@ pub fn get_text(state: tauri::State<StringWrapper>) -> String {
 }
 
 #[tauri::command]
+pub fn get_translate_mode(state: tauri::State<crate::TranslateModeWrapper>) -> String {
+    return state.0.lock().unwrap().to_string();
+}
+
+#[tauri::command]
 pub fn reload_store() {
     let state = APP.get().unwrap().state::<StoreWrapper>();
     let mut store = state.0.lock().unwrap();
@@ -111,20 +116,106 @@ pub fn set_proxy() -> Result<bool, ()> {
     };
     let proxy = format!("http://{}:{}", host, port);
 
-    std::env::set_var("http_proxy", &proxy);
-    std::env::set_var("https_proxy", &proxy);
-    std::env::set_var("all_proxy", &proxy);
+    // 大小写都设：WebView2 读大写，部分库读小写
+    for k in ["http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"] {
+        std::env::set_var(k, &proxy);
+    }
     std::env::set_var("no_proxy", &no_proxy);
+    std::env::set_var("NO_PROXY", &no_proxy);
     Ok(true)
 }
 
 #[tauri::command]
 pub fn unset_proxy() -> Result<bool, ()> {
-    std::env::remove_var("http_proxy");
-    std::env::remove_var("https_proxy");
-    std::env::remove_var("all_proxy");
-    std::env::remove_var("no_proxy");
+    // 之前只删了小写，系统继承来的大写变量还在，导致代理关了仍然走代理
+    for k in [
+        "http_proxy",
+        "HTTP_PROXY",
+        "https_proxy",
+        "HTTPS_PROXY",
+        "all_proxy",
+        "ALL_PROXY",
+        "no_proxy",
+        "NO_PROXY",
+    ] {
+        std::env::remove_var(k);
+    }
     Ok(true)
+}
+
+/// 读 Windows 系统代理设置（分流软件开关控制的就是它）
+#[cfg(target_os = "windows")]
+fn read_system_proxy() -> Option<String> {
+    use std::process::Command;
+    let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+
+    let enable = Command::new("reg")
+        .args(["query", key, "/v", "ProxyEnable"])
+        .output()
+        .ok()?;
+    let es = String::from_utf8_lossy(&enable.stdout);
+    // 输出形如: "    ProxyEnable    REG_DWORD    0x1"
+    if !es.contains("0x1") {
+        return None;
+    }
+
+    let server = Command::new("reg")
+        .args(["query", key, "/v", "ProxyServer"])
+        .output()
+        .ok()?;
+    let ss = String::from_utf8_lossy(&server.stdout);
+    for line in ss.lines() {
+        if let Some(pos) = line.find("REG_SZ") {
+            let v = line[pos + 6..].trim();
+            if v.is_empty() {
+                continue;
+            }
+            // 可能是 "127.0.0.1:10808" 或 "http=...;https=..."，取第一个
+            let first = v.split(';').next().unwrap_or(v).trim();
+            let addr = first.rsplit('=').next().unwrap_or(first).trim();
+            if addr.contains(':') {
+                return Some(addr.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 跟随系统代理：系统开了就用它，关了就不走代理
+#[tauri::command]
+pub fn sync_system_proxy() -> Result<bool, ()> {
+    #[cfg(target_os = "windows")]
+    {
+        match read_system_proxy() {
+            Some(addr) => {
+                let proxy = format!("http://{}", addr);
+                for k in ["http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"] {
+                    std::env::set_var(k, &proxy);
+                }
+                let no_proxy = "localhost,127.0.0.1,::1";
+                std::env::set_var("no_proxy", no_proxy);
+                std::env::set_var("NO_PROXY", no_proxy);
+                Ok(true)
+            }
+            None => {
+                for k in [
+                    "http_proxy",
+                    "HTTP_PROXY",
+                    "https_proxy",
+                    "HTTPS_PROXY",
+                    "all_proxy",
+                    "ALL_PROXY",
+                ] {
+                    std::env::remove_var(k);
+                }
+                Ok(false)
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
 }
 
 #[tauri::command]
@@ -222,4 +313,12 @@ pub fn open_devtools(window: tauri::Window) {
     } else {
         window.close_devtools();
     }
+}
+
+/// 把文本写到用户选定的路径。前端 dialog.save 只能拿路径，
+/// fs 插件的 scope 限定在应用目录，所以这里单独开一个口子。
+#[tauri::command]
+pub fn save_text_file(path: String, content: String) -> Result<(), Error> {
+    std::fs::write(&path, content.as_bytes())?;
+    Ok(())
 }

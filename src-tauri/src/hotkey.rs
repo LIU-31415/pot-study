@@ -1,5 +1,5 @@
 use crate::config::{get, set};
-use crate::window::{input_translate, ocr_recognize, ocr_translate, selection_translate};
+use crate::window::{input_translate, ocr_recognize, ocr_translate, selection_translate, study_translate};
 use crate::APP;
 use log::{info, warn};
 use tauri::{AppHandle, GlobalShortcutManager};
@@ -49,6 +49,12 @@ pub fn register_shortcut(shortcut: &str) -> Result<(), String> {
             selection_translate,
             "",
         )?,
+        "hotkey_selection_translate_study" => register(
+            app_handle,
+            "hotkey_selection_translate_study",
+            study_translate,
+            "",
+        )?,
         "hotkey_input_translate" => {
             register(app_handle, "hotkey_input_translate", input_translate, "")?
         }
@@ -59,6 +65,16 @@ pub fn register_shortcut(shortcut: &str) -> Result<(), String> {
                 app_handle,
                 "hotkey_selection_translate",
                 selection_translate,
+                "",
+            )?;
+            // 学习模式热键：默认 Alt+S，未配置时写入默认值
+            if get("hotkey_selection_translate_study").is_none() {
+                set("hotkey_selection_translate_study", "Alt+S");
+            }
+            register(
+                app_handle,
+                "hotkey_selection_translate_study",
+                study_translate,
                 "",
             )?;
             register(app_handle, "hotkey_input_translate", input_translate, "")?;
@@ -78,6 +94,12 @@ pub fn register_shortcut_by_frontend(name: &str, shortcut: &str) -> Result<(), S
             app_handle,
             "hotkey_selection_translate",
             selection_translate,
+            shortcut,
+        )?,
+        "hotkey_selection_translate_study" => register(
+            app_handle,
+            "hotkey_selection_translate_study",
+            study_translate,
             shortcut,
         )?,
         "hotkey_input_translate" => register(

@@ -137,21 +137,39 @@ fn translate_window() -> Window {
         return window;
     }
     window.set_skip_taskbar(true).unwrap();
-    // Get Translate Window Size
-    let width = match get("translate_window_width") {
-        Some(v) => v.as_i64().unwrap(),
+    // Get Translate Window Size：按当前模式取各自的尺寸（快捷 / 学习分开记）
+    let study_mode = {
+        let app_handle = APP.get().unwrap();
+        let s: tauri::State<crate::TranslateModeWrapper> = app_handle.state();
+        let m = s.0.lock().unwrap().clone();
+        m == "study"
+    };
+    let (w_key, h_key, w_default, h_default) = if study_mode {
+        ("study_window_width", "study_window_height", 700, 620)
+    } else {
+        ("translate_window_width", "translate_window_height", 350, 420)
+    };
+    let mut width = match get(w_key) {
+        Some(v) => v.as_i64().unwrap_or(w_default),
         None => {
-            set("translate_window_width", 350);
-            350
+            set(w_key, w_default);
+            w_default
         }
     };
-    let height = match get("translate_window_height") {
-        Some(v) => v.as_i64().unwrap(),
+    let mut height = match get(h_key) {
+        Some(v) => v.as_i64().unwrap_or(h_default),
         None => {
-            set("translate_window_height", 420);
-            420
+            set(h_key, h_default);
+            h_default
         }
     };
+    // 防御：异常值（负数、过大）回退到默认，与前端校验保持一致
+    if width < 200 || width > 4000 {
+        width = w_default;
+    }
+    if height < 200 || height > 4000 {
+        height = h_default;
+    }
 
     let monitor = window.current_monitor().unwrap().unwrap();
     let dpi = monitor.scale_factor();
@@ -227,15 +245,42 @@ pub fn selection_translate() {
     use selection::get_text;
     // Get Selected Text
     let text = get_text();
+    let app_handle = APP.get().unwrap();
     if !text.trim().is_empty() {
-        let app_handle = APP.get().unwrap();
         // Write into State
         let state: tauri::State<StringWrapper> = app_handle.state();
         state.0.lock().unwrap().replace_range(.., &text);
     }
+    set_mode(app_handle, "quick");
 
+    let existed = app_handle.get_window("translate").is_some();
     let window = translate_window();
-    window.emit("new_text", text).unwrap();
+    if existed {
+        window.emit("new_text", text).unwrap();
+    }
+}
+
+pub fn study_translate() {
+    use selection::get_text;
+    // Get Selected Text
+    let text = get_text();
+    let app_handle = APP.get().unwrap();
+    if !text.trim().is_empty() {
+        let state: tauri::State<StringWrapper> = app_handle.state();
+        state.0.lock().unwrap().replace_range(.., &text);
+    }
+    set_mode(app_handle, "study");
+
+    let existed = app_handle.get_window("translate").is_some();
+    let window = translate_window();
+    if existed {
+        window.emit("new_text_study", text).unwrap();
+    }
+}
+
+fn set_mode(app_handle: &tauri::AppHandle, mode: &str) {
+    let state: tauri::State<crate::TranslateModeWrapper> = app_handle.state();
+    state.0.lock().unwrap().replace_range(.., mode);
 }
 
 pub fn input_translate() {
@@ -264,8 +309,24 @@ pub fn text_translate(text: String) {
     // Clear State
     let state: tauri::State<StringWrapper> = app_handle.state();
     state.0.lock().unwrap().replace_range(.., &text);
+    set_mode(app_handle, "quick");
+    let existed = app_handle.get_window("translate").is_some();
     let window = translate_window();
-    window.emit("new_text", text).unwrap();
+    if existed {
+        window.emit("new_text", text).unwrap();
+    }
+}
+
+pub fn study_translate_text(text: String) {
+    let app_handle = APP.get().unwrap();
+    let state: tauri::State<StringWrapper> = app_handle.state();
+    state.0.lock().unwrap().replace_range(.., &text);
+    set_mode(app_handle, "study");
+    let existed = app_handle.get_window("translate").is_some();
+    let window = translate_window();
+    if existed {
+        window.emit("new_text_study", text).unwrap();
+    }
 }
 
 pub fn image_translate() {

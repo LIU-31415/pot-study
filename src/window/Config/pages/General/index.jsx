@@ -37,6 +37,7 @@ export default function General() {
     const [devMode, setDevMode] = useConfig('dev_mode', false);
     const [trayClickEvent, setTrayClickEvent] = useConfig('tray_click_event', 'config');
     const [proxyEnable, setProxyEnable] = useConfig('proxy_enable', false);
+    const [proxyFollowSystem, setProxyFollowSystem] = useConfig('proxy_follow_system', true);
     const [proxyHost, setProxyHost] = useConfig('proxy_host', '');
     const [proxyPort, setProxyPort] = useConfig('proxy_port', '');
     const [proxyUsername, setProxyUsername] = useConfig('proxy_username', '');
@@ -496,6 +497,29 @@ export default function General() {
                 <CardBody>
                     <div className='config-item'>
                         <h3>{t('config.general.proxy.title')}</h3>
+                        {proxyFollowSystem !== null && (
+                            <Switch
+                                isSelected={proxyFollowSystem}
+                                onValueChange={async (v) => {
+                                    setProxyFollowSystem(v);
+                                    await invoke('sync_system_proxy').catch(() => {});
+                                    toast.success(t('config.general.proxy_change'), {
+                                        duration: 1000,
+                                        style: toastStyle,
+                                    });
+                                }}
+                            />
+                        )}
+                    </div>
+                    {proxyFollowSystem && (
+                        <p className='text-small text-default-500 -mt-2 mb-3'>
+                            {t('config.general.proxy.follow_hint')}
+                        </p>
+                    )}
+                    {!proxyFollowSystem && (
+                    <>
+                    <div className='config-item'>
+                        <h3>{t('config.general.proxy.follow_system')}</h3>
                         {proxyEnable !== null && (
                             <Switch
                                 isSelected={proxyEnable}
@@ -597,6 +621,8 @@ export default function General() {
                             />
                         )}
                     </div>
+                    </>
+                    )}
                 </CardBody>
             </Card>
         </>

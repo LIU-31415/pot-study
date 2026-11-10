@@ -37,6 +37,7 @@ fn http_handle(request: Request) {
         "/" => handle_translate(request),
         "/config" => handle_config(request),
         "/translate" => handle_translate(request),
+        "/study_translate" => handle_study_translate(request),
         "/selection_translate" => handle_selection_translate(request),
         "/input_translate" => handle_input_translate(request),
         "/ocr_recognize" => handle_ocr_recognize(request),
@@ -58,6 +59,13 @@ fn handle_translate(mut request: Request) {
     let mut content = String::new();
     request.as_reader().read_to_string(&mut content).unwrap();
     text_translate(content);
+    response_ok(request);
+}
+
+fn handle_study_translate(mut request: Request) {
+    let mut content = String::new();
+    request.as_reader().read_to_string(&mut content).unwrap();
+    study_translate_text(content);
     response_ok(request);
 }
 

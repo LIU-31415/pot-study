@@ -1,19 +1,23 @@
 import { readDir, BaseDirectory, readTextFile, exists } from '@tauri-apps/api/fs';
 import { DragDropContext, Draggable, Droppable } from 'react-beautiful-dnd';
-import { appWindow, currentMonitor } from '@tauri-apps/api/window';
+import { appWindow, currentMonitor, LogicalSize } from '@tauri-apps/api/window';
 import { appConfigDir, join } from '@tauri-apps/api/path';
 import { convertFileSrc } from '@tauri-apps/api/tauri';
 import { Spacer, Button } from '@nextui-org/react';
-import { AiFillCloseCircle } from 'react-icons/ai';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useAtomValue } from 'jotai';
 import { listen } from '@tauri-apps/api/event';
-import { BsPinFill } from 'react-icons/bs';
+import { LuPin, LuX } from 'react-icons/lu';
 
 import LanguageArea from './components/LanguageArea';
 import SourceArea from './components/SourceArea';
+import { translateModeAtom } from './components/SourceArea';
+import { sourceTextAtom } from './components/SourceArea';
 import TargetArea from './components/TargetArea';
+import StudyArea from './components/StudyArea';
 import { osType } from '../../utils/env';
 import { useConfig } from '../../hooks';
+import { useStudySyncEngine } from '../../hooks/useStudySyncEngine';
 import { store } from '../../utils/store';
 import { info } from 'tauri-plugin-log-api';
 
@@ -64,9 +68,32 @@ void listen('tauri://move', () => {
 });
 
 export default function Translate() {
+    // 学习模式 × 翻译模式 双向同步引擎（幂等，开关默认关闭）
+    useStudySyncEngine();
     const [closeOnBlur] = useConfig('translate_close_on_blur', true);
     const [alwaysOnTop] = useConfig('translate_always_on_top', false);
     const [windowPosition] = useConfig('translate_window_position', 'mouse');
+    const translateMode = useAtomValue(translateModeAtom);
+    const sourceTextValue = useAtomValue(sourceTextAtom);
+    const modeRef = useRef(translateMode);
+    useEffect(() => {
+        modeRef.current = translateMode;
+    }, [translateMode]);
+
+    // 按模式应用各自的窗口尺寸（快捷 / 学习分开记）
+    const sizeGenRef = useRef(0);
+    const applyModeSize = async (mode) => {
+        const gen = ++sizeGenRef.current;
+        try {
+            const prefix = mode === 'study' ? 'study_window' : 'translate_window';
+            const w = await store.get(`${prefix}_width`);
+            const h = await store.get(`${prefix}_height`);
+            if (gen !== sizeGenRef.current) return; // 期间又切了模式，丢弃
+            const width = typeof w === 'number' && w > 200 ? w : mode === 'study' ? 700 : 350;
+            const height = typeof h === 'number' && h > 200 ? h : mode === 'study' ? 620 : 420;
+            await appWindow.setSize(new LogicalSize(width, height));
+        } catch {}
+    };
     const [rememberWindowSize] = useConfig('translate_remember_window_size', false);
     const [translateServiceInstanceList, setTranslateServiceInstanceList] = useConfig('translate_service_list', [
         'deepl',
@@ -81,6 +108,30 @@ export default function Translate() {
     const [collectionServiceInstanceList] = useConfig('collection_service_list', []);
     const [hideLanguage] = useConfig('hide_language', false);
     const [pined, setPined] = useState(false);
+    const autoPinedRef = useRef(false);
+
+    // 学习模式自动钉住：避免失焦关闭后重新翻译、浪费 token
+    // 依赖里带上 sourceTextValue：每次新的划词都重新钉住，即使上一轮用户手动取消过
+    useEffect(() => {
+        if (translateMode === 'study' && sourceTextValue) {
+            // 只有“进去之前没钉住”才算自动钉住；用户原本手动钉的不归我们管
+            if (!pined) autoPinedRef.current = true;
+            applyModeSize('study');
+            unlistenBlur();
+            appWindow.setAlwaysOnTop(true);
+            setPined(true);
+        } else if (translateMode !== 'study' && autoPinedRef.current) {
+            // 从学习模式切回快捷模式，恢复默认的失焦关闭与快捷模式尺寸
+            applyModeSize('quick');
+            if (closeOnBlur) {
+                unlisten = listenBlur();
+            }
+            appWindow.setAlwaysOnTop(false);
+            setPined(false);
+            autoPinedRef.current = false;
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [translateMode, sourceTextValue]);
     const [pluginList, setPluginList] = useState(null);
     const [serviceInstanceConfigMap, setServiceInstanceConfigMap] = useState(null);
     const reorder = (list, startIndex, endIndex) => {
@@ -144,12 +195,18 @@ export default function Translate() {
                 }
                 resizeTimeout = setTimeout(async () => {
                     if (appWindow.label === 'translate') {
-                        let size = await appWindow.outerSize();
+                        const modeAtMeasure = modeRef.current;
+                        let size = await appWindow.innerSize();
                         const monitor = await currentMonitor();
+                        if (!monitor) return;
                         const factor = monitor.scaleFactor;
                         size = size.toLogical(factor);
-                        await store.set('translate_window_height', parseInt(size.height));
-                        await store.set('translate_window_width', parseInt(size.width));
+                        // 测量期间模式变了，别把尺寸存到错的那一栏
+                        if (modeAtMeasure !== modeRef.current) return;
+                        const prefix =
+                            modeAtMeasure === 'study' ? 'study_window' : 'translate_window';
+                        await store.set(`${prefix}_height`, parseInt(size.height));
+                        await store.set(`${prefix}_width`, parseInt(size.width));
                         await store.save();
                     }
                 }, 100);
@@ -231,27 +288,29 @@ export default function Translate() {
     return (
         pluginList && (
             <div
-                className={`bg-background h-screen w-screen ${
-                    osType === 'Linux' && 'rounded-[10px] border-1 border-default-100'
+                className={`relative window-enter bg-background h-screen w-screen ${
+                    osType === 'Linux' && 'rounded-[14px] border-1 border-default-100'
                 }`}
             >
                 <div
-                    className='fixed top-[5px] left-[5px] right-[5px] h-[30px]'
+                    className='absolute top-[4px] left-[5px] right-[5px] h-[24px]'
                     data-tauri-drag-region='true'
                 />
-                <div className={`h-[35px] w-full flex ${osType === 'Darwin' ? 'justify-end' : 'justify-between'}`}>
+                <div className={`h-[28px] w-full flex items-center ${osType === 'Darwin' ? 'justify-end' : 'justify-between'}`}>
                     <Button
                         isIconOnly
                         size='sm'
                         variant='flat'
                         disableAnimation
-                        className='my-auto bg-transparent'
+                        className='my-auto bg-transparent rounded-full'
                         onPress={() => {
                             if (pined) {
                                 if (closeOnBlur) {
                                     unlisten = listenBlur();
                                 }
                                 appWindow.setAlwaysOnTop(false);
+                                // 用户手动取消钉住，清掉自动标记
+                                autoPinedRef.current = false;
                             } else {
                                 unlistenBlur();
                                 appWindow.setAlwaysOnTop(true);
@@ -259,23 +318,23 @@ export default function Translate() {
                             setPined(!pined);
                         }}
                     >
-                        <BsPinFill className={`text-[20px] ${pined ? 'text-primary' : 'text-default-400'}`} />
+                        <LuPin className={`text-[15px] transition-colors ${pined ? 'text-primary' : 'text-default-300 hover:text-default-500'}`} />
                     </Button>
                     <Button
                         isIconOnly
                         size='sm'
                         variant='flat'
                         disableAnimation
-                        className={`my-auto ${osType === 'Darwin' && 'hidden'} bg-transparent`}
+                        className={`my-auto ${osType === 'Darwin' && 'hidden'} bg-transparent rounded-full`}
                         onPress={() => {
                             void appWindow.close();
                         }}
                     >
-                        <AiFillCloseCircle className='text-[20px] text-default-400' />
+                        <LuX className='text-[16px] text-default-300 hover:text-default-500 transition-colors' />
                     </Button>
                 </div>
-                <div className={`${osType === 'Linux' ? 'h-[calc(100vh-37px)]' : 'h-[calc(100vh-35px)]'} px-[8px]`}>
-                    <div className='h-full overflow-y-auto'>
+                <div className={`${osType === 'Linux' ? 'h-[calc(100vh-30px)]' : 'h-[calc(100vh-28px)]'} px-[10px]`}>
+                    <div className='h-full overflow-y-auto pr-[6px]'>
                         <div>
                             {serviceInstanceConfigMap !== null && (
                                 <SourceArea
@@ -283,11 +342,17 @@ export default function Translate() {
                                     serviceInstanceConfigMap={serviceInstanceConfigMap}
                                 />
                             )}
+                            <Spacer y={2} />
                         </div>
                         <div className={`${hideLanguage && 'hidden'}`}>
                             <LanguageArea />
                             <Spacer y={2} />
                         </div>
+                        {translateMode === 'study' &&
+                        translateServiceInstanceList !== null &&
+                        serviceInstanceConfigMap !== null ? (
+                            <StudyArea />
+                        ) : (
                         <DragDropContext onDragEnd={onDragEnd}>
                             <Droppable
                                 droppableId='droppable'
@@ -325,7 +390,7 @@ export default function Translate() {
                                                                     pluginList={pluginList}
                                                                     serviceInstanceConfigMap={serviceInstanceConfigMap}
                                                                 />
-                                                                <Spacer y={2} />
+                                                                <Spacer y={3} />
                                                             </div>
                                                         )}
                                                     </Draggable>
@@ -337,6 +402,7 @@ export default function Translate() {
                                 )}
                             </Droppable>
                         </DragDropContext>
+                        )}
                     </div>
                 </div>
             </div>

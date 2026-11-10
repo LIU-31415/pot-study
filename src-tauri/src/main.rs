@@ -41,16 +41,20 @@ pub static APP: OnceCell<tauri::AppHandle> = OnceCell::new();
 // Text to be translated
 pub struct StringWrapper(pub Mutex<String>);
 
+// 当前翻译模式：quick | study
+pub struct TranslateModeWrapper(pub Mutex<String>);
+
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, cwd| {
-            Notification::new(&app.config().tauri.bundle.identifier)
-                .title("The program is already running. Please do not start it again!")
-                .body(cwd)
-                .icon("pot")
-                .show()
-                .unwrap();
-        }))
+        // [dev] 临时禁用单实例插件：该 git 版本在 Windows 26100 上启动即 panic（null reference）
+        // .plugin(tauri_plugin_single_instance::init(|app, _, cwd| {
+        //     Notification::new(&app.config().tauri.bundle.identifier)
+        //         .title("The program is already running. Please do not start it again!")
+        //         .body(cwd)
+        //         .icon("pot")
+        //         .show()
+        //         .unwrap();
+        // }))
         .plugin(
             tauri_plugin_log::Builder::default()
                 .targets([LogTarget::LogDir, LogTarget::Stdout])
@@ -63,7 +67,11 @@ fn main() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_fs_watch::init())
-        .system_tray(tauri::SystemTray::new())
+        .system_tray(tauri::SystemTray::new().with_icon(tauri::Icon::Rgba {
+            rgba: include_bytes!("../icons/tray.rgba").to_vec(),
+            width: 48,
+            height: 48,
+        }))
         .setup(|app| {
             info!("============== Start App ==============");
             #[cfg(target_os = "macos")]
@@ -78,6 +86,25 @@ fn main() {
             // Init Config
             info!("Init Config Store");
             init_config(app);
+            // 代理策略：跟随系统（分流软件开关）或手动配置，必须在 WebView2 初始化前确定
+            let follow_system = get("proxy_follow_system")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            if follow_system {
+                let on = sync_system_proxy().unwrap_or(false);
+                info!("Proxy: follow system = {}", on);
+            } else {
+                let manual = get("proxy_enable")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if manual {
+                    let _ = set_proxy();
+                    info!("Proxy: manual enabled");
+                } else {
+                    let _ = unset_proxy();
+                    info!("Proxy: disabled");
+                }
+            }
             // Check First Run
             if is_first_run() {
                 // Open Config Window
@@ -85,6 +112,7 @@ fn main() {
                 config_window();
             }
             app.manage(StringWrapper(Mutex::new("".to_string())));
+            app.manage(TranslateModeWrapper(Mutex::new("quick".to_string())));
             // Update Tray Menu
             update_tray(app.app_handle(), "".to_string(), "".to_string());
             // Start http server
@@ -130,14 +158,17 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             reload_store,
             get_text,
+            get_translate_mode,
             cut_image,
             get_base64,
             copy_img,
             system_ocr,
             set_proxy,
             unset_proxy,
+            sync_system_proxy,
             run_binary,
             open_devtools,
+            save_text_file,
             register_shortcut_by_frontend,
             update_tray,
             updater_window,

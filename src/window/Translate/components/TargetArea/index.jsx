@@ -11,20 +11,20 @@ import {
     DropdownTrigger,
     Tooltip,
 } from '@nextui-org/react';
-import { BiCollapseVertical, BiExpandVertical } from 'react-icons/bi';
+import { LuChevronsDownUp, LuChevronsUpDown } from 'react-icons/lu';
 import { BaseDirectory, readTextFile } from '@tauri-apps/api/fs';
 import { sendNotification } from '@tauri-apps/api/notification';
 import React, { useEffect, useState, useRef } from 'react';
 import { writeText } from '@tauri-apps/api/clipboard';
 import PulseLoader from 'react-spinners/PulseLoader';
-import { TbTransformFilled } from 'react-icons/tb';
-import { HiOutlineVolumeUp } from 'react-icons/hi';
+import { LuArrowLeftRight } from 'react-icons/lu';
+import { LuVolume2 } from 'react-icons/lu';
 import { semanticColors } from '@nextui-org/theme';
 import toast, { Toaster } from 'react-hot-toast';
-import { MdContentCopy } from 'react-icons/md';
+import { LuCopy } from 'react-icons/lu';
 import { useTranslation } from 'react-i18next';
 import Database from 'tauri-plugin-sql-api';
-import { GiCycle } from 'react-icons/gi';
+import { LuRefreshCw } from 'react-icons/lu';
 import { useTheme } from 'next-themes';
 import { useAtomValue } from 'jotai';
 import { nanoid } from 'nanoid';
@@ -318,7 +318,7 @@ export default function TargetArea(props) {
 
     // hide empty textarea
     useEffect(() => {
-        if (textAreaRef.current !== null) {
+        if (textAreaRef.current) {
             textAreaRef.current.style.height = '0px';
             if (result !== '') {
                 textAreaRef.current.style.height = textAreaRef.current.scrollHeight + 'px';
@@ -376,11 +376,11 @@ export default function TargetArea(props) {
     return (
         <Card
             shadow='none'
-            className='rounded-[10px]'
+            className='rounded-[14px] border border-content3/60'
         >
             <Toaster />
             <CardHeader
-                className={`flex justify-between py-1 px-0 bg-content2 h-[30px] ${hide ? 'rounded-[10px]' : 'rounded-t-[10px]'}`}
+                className={`flex justify-between py-1 px-0 bg-content1 h-[32px] ${hide ? 'rounded-[14px]' : 'rounded-t-[14px]'}`}
                 {...drag}
             >
                 {/* current service instance and available service instance to change */}
@@ -466,12 +466,12 @@ export default function TargetArea(props) {
                     </Dropdown>
                     <PulseLoader
                         loading={isLoading}
-                        color={theme === 'dark' ? semanticColors.dark.default[500] : semanticColors.light.default[500]}
-                        size={8}
+                        color={theme === 'dark' ? semanticColors.dark.default[400] : semanticColors.light.default[300]}
+                        size={5}
                         cssOverride={{
                             display: 'inline-block',
                             margin: 'auto',
-                            marginLeft: '20px',
+                            marginLeft: '10px',
                         }}
                     />
                 </div>
@@ -485,9 +485,9 @@ export default function TargetArea(props) {
                         onPress={() => setHide(!hide)}
                     >
                         {hide ? (
-                            <BiExpandVertical className='text-[16px]' />
+                            <LuChevronsUpDown className='text-[16px]' />
                         ) : (
-                            <BiCollapseVertical className='text-[16px]' />
+                            <LuChevronsDownUp className='text-[16px]' />
                         )}
                     </Button>
                 </div>
@@ -495,14 +495,13 @@ export default function TargetArea(props) {
             <animated.div style={{ ...springs }}>
                 <div ref={boundRef}>
                     {/* result content */}
-                    <CardBody className={`p-[12px] pb-0 ${hide && 'h-0 p-0'}`}>
+                    <CardBody className={`p-[14px] pb-0 ${hide && 'h-0 p-0'}`}>
                         {typeof result === 'string' ? (
-                            <textarea
-                                ref={textAreaRef}
-                                className={`text-[${appFontSize}px] h-0 resize-none bg-transparent select-text outline-none`}
-                                readOnly
-                                value={result}
-                            />
+                            <div
+                                className={`text-[${appFontSize}px] leading-[1.65] text-foreground select-text whitespace-pre-wrap break-words`}
+                            >
+                                {result}
+                            </div>
                         ) : (
                             <div>
                                 {result['pronunciations'] &&
@@ -629,9 +628,9 @@ export default function TargetArea(props) {
                         )}
                     </CardBody>
                     <CardFooter
-                        className={`bg-content1 rounded-none rounded-b-[10px] flex px-[12px] p-[5px] ${hide && 'hidden'}`}
+                        className={`bg-content1 rounded-none rounded-b-[14px] flex px-[12px] p-[5px] ${hide && 'hidden'}`}
                     >
-                        <ButtonGroup>
+                        <div className='flex items-center gap-[2px] [&_button]:!rounded-full [&_button]:!text-default-500 [&_button]:data-[hover=true]:!bg-content2'>
                             {/* speak button */}
                             <Tooltip content={t('translate.speak')}>
                                 <Button
@@ -645,7 +644,7 @@ export default function TargetArea(props) {
                                         });
                                     }}
                                 >
-                                    <HiOutlineVolumeUp className='text-[16px]' />
+                                    <LuVolume2 className='text-[16px]' />
                                 </Button>
                             </Tooltip>
                             {/* copy button */}
@@ -659,7 +658,7 @@ export default function TargetArea(props) {
                                         writeText(result);
                                     }}
                                 >
-                                    <MdContentCopy className='text-[16px]' />
+                                    <LuCopy className='text-[16px]' />
                                 </Button>
                             </Tooltip>
                             {/* translate back button */}
@@ -781,7 +780,7 @@ export default function TargetArea(props) {
                                         }
                                     }}
                                 >
-                                    <TbTransformFilled className='text-[16px]' />
+                                    <LuArrowLeftRight className='text-[16px]' />
                                 </Button>
                             </Tooltip>
                             {/* error retry button */}
@@ -797,7 +796,7 @@ export default function TargetArea(props) {
                                         translate();
                                     }}
                                 >
-                                    <GiCycle className='text-[16px]' />
+                                    <LuRefreshCw className='text-[16px]' />
                                 </Button>
                             </Tooltip>
                             {/* available collection service instance */}
@@ -871,7 +870,7 @@ export default function TargetArea(props) {
                                         </Button>
                                     );
                                 })}
-                        </ButtonGroup>
+                        </div>
                     </CardFooter>
                 </div>
             </animated.div>

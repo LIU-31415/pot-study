@@ -2,15 +2,17 @@ import { Button, Card, CardBody, CardFooter, ButtonGroup, Chip, Tooltip, Spacer 
 import { BaseDirectory, readTextFile } from '@tauri-apps/api/fs';
 import React, { useEffect, useRef, useState } from 'react';
 import { writeText } from '@tauri-apps/api/clipboard';
-import { HiOutlineVolumeUp } from 'react-icons/hi';
+import { LuVolume2 } from 'react-icons/lu';
 import { appWindow } from '@tauri-apps/api/window';
 import toast, { Toaster } from 'react-hot-toast';
 import { listen } from '@tauri-apps/api/event';
-import { MdContentCopy } from 'react-icons/md';
-import { MdSmartButton } from 'react-icons/md';
+import { LuCopy } from 'react-icons/lu';
+import { LuWrapText } from 'react-icons/lu';
 import { useTranslation } from 'react-i18next';
-import { HiTranslate } from 'react-icons/hi';
-import { LuDelete } from 'react-icons/lu';
+import { LuLanguages } from 'react-icons/lu';
+import { LuChevronDown } from 'react-icons/lu';
+import { LuChevronUp } from 'react-icons/lu';
+import { LuTrash2 } from 'react-icons/lu';
 import { invoke } from '@tauri-apps/api';
 import { atom, useAtom } from 'jotai';
 import { getServiceName, getServiceSouceType, ServiceSourceType } from '../../../../utils/service_instance';
@@ -25,8 +27,10 @@ import { debug } from 'tauri-plugin-log-api';
 
 export const sourceTextAtom = atom('');
 export const detectLanguageAtom = atom('');
+export const translateModeAtom = atom('quick');
 
 let unlisten = null;
+let unlistenStudy = null;
 let timer = null;
 
 export default function SourceArea(props) {
@@ -34,6 +38,7 @@ export default function SourceArea(props) {
     const [appFontSize] = useConfig('app_font_size', 16);
     const [sourceText, setSourceText, syncSourceText] = useSyncAtom(sourceTextAtom);
     const [detectLanguage, setDetectLanguage] = useAtom(detectLanguageAtom);
+    const [translateMode, setTranslateMode] = useAtom(translateModeAtom);
     const [incrementalTranslate] = useConfig('incremental_translate', false);
     const [dynamicTranslate] = useConfig('dynamic_translate', false);
     const [deleteNewline] = useConfig('translate_delete_newline', false);
@@ -47,6 +52,8 @@ export default function SourceArea(props) {
     const toastStyle = useToastStyle();
     const { t } = useTranslation();
     const textAreaRef = useRef();
+    const [sourceExpanded, setSourceExpanded] = useState(false);
+    const [hasOverflow, setHasOverflow] = useState(false);
     const speak = useVoice();
 
     const handleNewText = async (text) => {
@@ -218,8 +225,19 @@ export default function SourceArea(props) {
                     f();
                 });
             }
+            if (unlistenStudy) {
+                unlistenStudy.then((f) => {
+                    f();
+                });
+            }
             unlisten = listen('new_text', (event) => {
                 appWindow.setFocus();
+                setTranslateMode('quick');
+                handleNewText(event.payload);
+            });
+            unlistenStudy = listen('new_text_study', (event) => {
+                appWindow.setFocus();
+                setTranslateMode('study');
                 handleNewText(event.payload);
             });
         }
@@ -243,16 +261,34 @@ export default function SourceArea(props) {
             recognizeServiceList !== null &&
             hideWindow !== null
         ) {
-            invoke('get_text').then((v) => {
+            invoke('get_text').then(async (v) => {
+                try {
+                    const m = await invoke('get_translate_mode');
+                    setTranslateMode(m === 'study' ? 'study' : 'quick');
+                } catch {}
                 handleNewText(v);
             });
         }
     }, [deleteNewline, incrementalTranslate, recognizeLanguage, recognizeServiceList, hideWindow]);
 
+    // 原文默认只占一行，把空间让给译文；[INPUT_TRANSLATE] 是自己输入的，保持展开
+    const sourceForceExpanded = windowType === '[INPUT_TRANSLATE]';
+    const sourceIsExpanded = sourceExpanded || sourceForceExpanded;
+
     useEffect(() => {
-        textAreaRef.current.style.height = '50px';
-        textAreaRef.current.style.height = textAreaRef.current.scrollHeight + 'px';
-    }, [sourceText]);
+        const el = textAreaRef.current;
+        if (!el) return;
+        const lineHeight = Math.round(appFontSize * 1.6);
+        el.style.height = '0px';
+        const contentHeight = el.scrollHeight;
+        if (sourceIsExpanded) {
+            el.style.height = contentHeight + 'px';
+        } else {
+            el.style.height = lineHeight + 'px';
+        }
+        el.style.overflowY = 'hidden';
+        setHasOverflow(contentHeight > lineHeight + 2);
+    }, [sourceText, sourceIsExpanded, appFontSize]);
 
     const detect_language = async (text) => {
         setDetectLanguage(await detect(text));
@@ -367,14 +403,15 @@ export default function SourceArea(props) {
         <div className={hideSource && windowType !== '[INPUT_TRANSLATE]' && 'hidden'}>
             <Card
                 shadow='none'
-                className='bg-content1 rounded-[10px] mt-[1px] pb-0'
+                className='bg-content1 rounded-[14px] mt-[1px] pb-0'
             >
                 <Toaster />
-                <CardBody className='bg-content1 p-[12px] pb-0 max-h-[40vh] overflow-y-auto'>
+                <CardBody className='bg-content1 p-[14px] pb-0 max-h-[40vh] overflow-y-auto'>
                     <textarea
                         autoFocus
                         ref={textAreaRef}
-                        className={`text-[${appFontSize}px] bg-content1 h-full resize-none outline-none`}
+                        className='leading-[1.6] text-default-700 bg-content1 resize-none outline-none'
+                        style={{ fontSize: `${appFontSize}px` }}
                         value={sourceText}
                         onKeyDown={keyDown}
                         onChange={(e) => {
@@ -384,9 +421,9 @@ export default function SourceArea(props) {
                     />
                 </CardBody>
 
-                <CardFooter className='bg-content1 rounded-none rounded-b-[10px] flex justify-between px-[12px] p-[5px]'>
+                <CardFooter className='bg-content1 rounded-none rounded-b-[14px] flex justify-between px-[12px] py-[5px]'>
                     <div className='flex justify-start'>
-                        <ButtonGroup className='mr-[5px]'>
+                        <div className='flex items-center gap-[2px] mr-[6px] [&_button]:!rounded-full [&_button]:!text-default-500 [&_button]:data-[hover=true]:!bg-content2'>
                             <Tooltip content={t('translate.speak')}>
                                 <Button
                                     isIconOnly
@@ -398,7 +435,7 @@ export default function SourceArea(props) {
                                         });
                                     }}
                                 >
-                                    <HiOutlineVolumeUp className='text-[16px]' />
+                                    <LuVolume2 className='text-[16px]' />
                                 </Button>
                             </Tooltip>
                             <Tooltip content={t('translate.copy')}>
@@ -410,7 +447,7 @@ export default function SourceArea(props) {
                                         writeText(sourceText);
                                     }}
                                 >
-                                    <MdContentCopy className='text-[16px]' />
+                                    <LuCopy className='text-[16px]' />
                                 </Button>
                             </Tooltip>
                             <Tooltip content={t('translate.delete_newline')}>
@@ -426,7 +463,7 @@ export default function SourceArea(props) {
                                         });
                                     }}
                                 >
-                                    <MdSmartButton className='text-[16px]' />
+                                    <LuWrapText className='text-[16px]' />
                                 </Button>
                             </Tooltip>
                             <Tooltip content={t('common.clear')}>
@@ -439,16 +476,32 @@ export default function SourceArea(props) {
                                         setSourceText('');
                                     }}
                                 >
-                                    <LuDelete className='text-[16px]' />
+                                    <LuTrash2 className='text-[16px]' />
                                 </Button>
                             </Tooltip>
-                        </ButtonGroup>
+                            {hasOverflow && !sourceForceExpanded && (
+                                <Tooltip content={sourceIsExpanded ? '收起原文' : '展开原文'}>
+                                    <Button
+                                        isIconOnly
+                                        variant='light'
+                                        size='sm'
+                                        onPress={() => setSourceExpanded((v) => !v)}
+                                    >
+                                        {sourceIsExpanded ? (
+                                            <LuChevronUp className='text-[16px]' />
+                                        ) : (
+                                            <LuChevronDown className='text-[16px]' />
+                                        )}
+                                    </Button>
+                                </Tooltip>
+                            )}
+                        </div>
                         {detectLanguage !== '' && (
                             <Chip
                                 size='sm'
                                 color='secondary'
-                                variant='dot'
-                                className='my-auto'
+                                variant='flat'
+                                className='my-auto bg-secondary-50 text-secondary-600'
                             >
                                 {t(`languages.${detectLanguage}`)}
                             </Chip>
@@ -460,8 +513,8 @@ export default function SourceArea(props) {
                             color='primary'
                             variant='light'
                             isIconOnly
-                            className='text-[14px] font-bold'
-                            startContent={<HiTranslate className='text-[16px]' />}
+                            className='text-[14px] font-bold rounded-full'
+                            startContent={<LuLanguages className='text-[16px]' />}
                             onPress={() => {
                                 detect_language(sourceText).then(() => {
                                     syncSourceText();
@@ -471,7 +524,6 @@ export default function SourceArea(props) {
                     </Tooltip>
                 </CardFooter>
             </Card>
-            <Spacer y={2} />
         </div>
     );
 }
