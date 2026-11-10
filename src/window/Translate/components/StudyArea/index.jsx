@@ -106,6 +106,13 @@ export default function StudyArea() {
     const [secondLanguage] = useConfig('translate_second_language', 'en');
     const [studyServices] = useConfig('study_services', []);
     const [studyServiceId, setStudyServiceId] = useConfig('study_service_id', '');
+    // 复制/导出的内容形态：both = 原文+译文，target = 仅译文
+    const [copyMode, setCopyMode] = useConfig('study_copy_mode', 'both');
+    // 同 selected/pairs：onPress 可能拿到旧闭包，导出前从 ref 读当前值
+    const copyModeRef = useRef('both');
+    useEffect(() => {
+        copyModeRef.current = copyMode === 'target' ? 'target' : 'both';
+    }, [copyMode]);
     const { t } = useTranslation();
 
     // 学习模式的服务独立配置（OpenAI 兼容格式），不再复用翻译服务列表
@@ -273,8 +280,15 @@ export default function StudyArea() {
     const modelLabel = active?.model || '';
 
     // 导出：选中了就只导选中的，没选就导全部
-    const buildMarkdown = (items) =>
-        items.map((p, i) => `**${i + 1}.** ${p.src}\n\n${p.dst || ''}`).join('\n\n---\n\n');
+    const buildMarkdown = (items) => {
+        if (copyModeRef.current === 'target') {
+            return items
+                .map((p) => p.dst || '')
+                .filter(Boolean)
+                .join('\n\n');
+        }
+        return items.map((p, i) => `**${i + 1}.** ${p.src}\n\n${p.dst || ''}`).join('\n\n---\n\n');
+    };
 
     const exportItems = () => {
         const sel = selectedRef.current;
@@ -307,7 +321,11 @@ export default function StudyArea() {
         if (!items.length) return;
         const d = new Date();
         const pad = (n) => String(n).padStart(2, '0');
-        const name = `${t('translate.study_export_prefix')}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.md`;
+        const name = `${t(
+            copyModeRef.current === 'target'
+                ? 'translate.study_export_prefix'
+                : 'translate.study_export_prefix_both'
+        )}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.md`;
         try {
             const path = await save({
                 defaultPath: name,
@@ -362,6 +380,31 @@ export default function StudyArea() {
                     {isLoading && <Spinner size='sm' color='default' />}
                 </div>
                 <div className='flex items-center gap-1 shrink-0'>
+                    {/* 复制/导出的内容形态：切换后立即影响下一次复制与保存 */}
+                    <div className='flex items-center rounded-full bg-default-100 p-[2px] text-[11px] shrink-0 mr-0.5'>
+                        <button
+                            type='button'
+                            className={`px-[7px] py-[1px] rounded-full transition-colors ${
+                                copyMode === 'target'
+                                    ? 'text-default-500'
+                                    : 'bg-content1 text-foreground shadow-sm'
+                            }`}
+                            onClick={() => setCopyMode('both')}
+                        >
+                            {t('translate.study_copy_both')}
+                        </button>
+                        <button
+                            type='button'
+                            className={`px-[7px] py-[1px] rounded-full transition-colors ${
+                                copyMode === 'target'
+                                    ? 'bg-content1 text-foreground shadow-sm'
+                                    : 'text-default-500'
+                            }`}
+                            onClick={() => setCopyMode('target')}
+                        >
+                            {t('translate.study_copy_target')}
+                        </button>
+                    </div>
                     <Tooltip
                         content={
                             selected.size > 0

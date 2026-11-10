@@ -511,6 +511,9 @@
             "study_no_service": "还没配置学习模式服务，去设置 → 学习模式添加一个（填接口地址和密钥即可）",
             "study_failed": "翻译失败",
             "study_export_prefix": "译文",
+            "study_export_prefix_both": "原文译文",
+            "study_copy_both": "原文+译文",
+            "study_copy_target": "仅译文",
             "expand_source": "展开原文",
             "collapse_source": "收起原文"
         },

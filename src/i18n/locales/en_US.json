@@ -511,6 +511,9 @@
             "study_no_service": "No study service yet. Go to Settings → Study mode and add one (URL + API key).",
             "study_failed": "Translation failed",
             "study_export_prefix": "Translation",
+            "study_export_prefix_both": "Source-Target",
+            "study_copy_both": "Both",
+            "study_copy_target": "Target",
             "expand_source": "Expand source",
             "collapse_source": "Collapse source"
         },
