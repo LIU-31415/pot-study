@@ -14,7 +14,7 @@ import {
 } from '@nextui-org/react';
 import { Toaster, toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     LuChevronLeft,
     LuPencil,
