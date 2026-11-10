@@ -61,25 +61,37 @@ pub fn register_shortcut(shortcut: &str) -> Result<(), String> {
         "hotkey_ocr_recognize" => register(app_handle, "hotkey_ocr_recognize", ocr_recognize, "")?,
         "hotkey_ocr_translate" => register(app_handle, "hotkey_ocr_translate", ocr_translate, "")?,
         "all" => {
-            register(
-                app_handle,
-                "hotkey_selection_translate",
-                selection_translate,
-                "",
-            )?;
+            // 单个热键注册失败不能中断后面的：之前每步都用 ? 直接 return，
+            // 只要有一个被其他软件占用，剩下的热键全部不注册，用户看到的是“全部没反应”
+            let mut errors: Vec<String> = Vec::new();
+
+            if let Err(e) = register(app_handle, "hotkey_selection_translate", selection_translate, "") {
+                errors.push(format!("hotkey_selection_translate: {}", e));
+            }
             // 学习模式热键：默认 Alt+S，未配置时写入默认值
             if get("hotkey_selection_translate_study").is_none() {
                 set("hotkey_selection_translate_study", "Alt+S");
             }
-            register(
+            if let Err(e) = register(
                 app_handle,
                 "hotkey_selection_translate_study",
                 study_translate,
                 "",
-            )?;
-            register(app_handle, "hotkey_input_translate", input_translate, "")?;
-            register(app_handle, "hotkey_ocr_recognize", ocr_recognize, "")?;
-            register(app_handle, "hotkey_ocr_translate", ocr_translate, "")?;
+            ) {
+                errors.push(format!("hotkey_selection_translate_study: {}", e));
+            }
+            if let Err(e) = register(app_handle, "hotkey_input_translate", input_translate, "") {
+                errors.push(format!("hotkey_input_translate: {}", e));
+            }
+            if let Err(e) = register(app_handle, "hotkey_ocr_recognize", ocr_recognize, "") {
+                errors.push(format!("hotkey_ocr_recognize: {}", e));
+            }
+            if let Err(e) = register(app_handle, "hotkey_ocr_translate", ocr_translate, "") {
+                errors.push(format!("hotkey_ocr_translate: {}", e));
+            }
+            if !errors.is_empty() {
+                return Err(errors.join("; "));
+            }
         }
         _ => {}
     }

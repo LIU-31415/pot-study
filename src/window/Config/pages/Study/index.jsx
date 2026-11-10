@@ -221,7 +221,9 @@ export default function Study() {
             setFStatus({ ok: false, text: t('config.study.url_invalid') });
             return;
         }
-        saveEntry(url, fKey, undefined);
+        // 也要换算成完整端点：直接存 /v1 会被 openai 服务再拼一次，
+        // 变成 /v1/v1/chat/completions，每句都失败
+        saveEntry(toChatCompletionsUrl(url), fKey, undefined);
     };
 
     const removeEntry = (id) => {
@@ -281,8 +283,11 @@ export default function Study() {
         setStudyServices([...services, entry]);
         if (services.length === 0) {
             setStudyServiceId(entry.id);
+            // 只在空列表自动选中时才接管模型列表。
+            // 已有其他服务在生效时不能改 models：模型下拉会显示新网关的模型，
+            // 但 pickModel 写回的仍是当前生效那条，等于给 A 存了 B 的模型名。
+            setModels(gw.models);
         }
-        setModels(gw.models);
         setLocalFound(null);
         toast(t('config.study.local_added', { name: gw.name }), {
             duration: 3000,

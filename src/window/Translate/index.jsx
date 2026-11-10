@@ -18,7 +18,7 @@ import StudyArea from './components/StudyArea';
 import { osType } from '../../utils/env';
 import { useConfig } from '../../hooks';
 import { store } from '../../utils/store';
-import { info } from 'tauri-plugin-log-api';
+import { info, warn } from 'tauri-plugin-log-api';
 
 let blurTimeout = null;
 let resizeTimeout = null;
@@ -152,7 +152,13 @@ export default function Translate() {
     };
     // 是否自动关闭窗口
     useEffect(() => {
-        if (closeOnBlur !== null && !closeOnBlur) {
+        if (closeOnBlur === null) return;
+        if (closeOnBlur) {
+            // 重新开启时要把监听装回去：关掉那一次已经把它注销了，
+            // 之前这里只处理 false，开关等于单向失效
+            unlistenBlur();
+            unlisten = listenBlur();
+        } else {
             unlistenBlur();
         }
     }, [closeOnBlur]);
@@ -228,23 +234,36 @@ export default function Translate() {
         let temp = {};
         for (const serviceType of serviceTypeList) {
             temp[serviceType] = {};
-            if (await exists(`plugins/${serviceType}`, { dir: BaseDirectory.AppConfig })) {
-                const plugins = await readDir(`plugins/${serviceType}`, { dir: BaseDirectory.AppConfig });
-                for (const plugin of plugins) {
-                    const infoStr = await readTextFile(`plugins/${serviceType}/${plugin.name}/info.json`, {
+            // 单个插件坏了（缺 info.json、JSON 语法错、图标路径无效）不能拖垮整个列表：
+            // 之前这里一抛错，setPluginList 就永远不执行，翻译窗口直接空白
+            try {
+                if (await exists(`plugins/${serviceType}`, { dir: BaseDirectory.AppConfig })) {
+                    const plugins = await readDir(`plugins/${serviceType}`, {
                         dir: BaseDirectory.AppConfig,
                     });
-                    let pluginInfo = JSON.parse(infoStr);
-                    if ('icon' in pluginInfo) {
-                        const appConfigDirPath = await appConfigDir();
-                        const iconPath = await join(
-                            appConfigDirPath,
-                            `/plugins/${serviceType}/${plugin.name}/${pluginInfo.icon}`
-                        );
-                        pluginInfo.icon = convertFileSrc(iconPath);
+                    for (const plugin of plugins) {
+                        try {
+                            const infoStr = await readTextFile(
+                                `plugins/${serviceType}/${plugin.name}/info.json`,
+                                { dir: BaseDirectory.AppConfig }
+                            );
+                            let pluginInfo = JSON.parse(infoStr);
+                            if ('icon' in pluginInfo) {
+                                const appConfigDirPath = await appConfigDir();
+                                const iconPath = await join(
+                                    appConfigDirPath,
+                                    `/plugins/${serviceType}/${plugin.name}/${pluginInfo.icon}`
+                                );
+                                pluginInfo.icon = convertFileSrc(iconPath);
+                            }
+                            temp[serviceType][plugin.name] = pluginInfo;
+                        } catch (e) {
+                            warn(`skip broken plugin ${serviceType}/${plugin.name}: ${e}`);
+                        }
                     }
-                    temp[serviceType][plugin.name] = pluginInfo;
                 }
+            } catch (e) {
+                warn(`scan plugin dir ${serviceType} failed: ${e}`);
             }
         }
         setPluginList({ ...temp });
@@ -262,20 +281,25 @@ export default function Translate() {
     }, []);
 
     const loadServiceInstanceConfigMap = async () => {
-        const config = {};
-        for (const serviceInstanceKey of translateServiceInstanceList) {
-            config[serviceInstanceKey] = (await store.get(serviceInstanceKey)) ?? {};
-        }
-        for (const serviceInstanceKey of recognizeServiceInstanceList) {
-            config[serviceInstanceKey] = (await store.get(serviceInstanceKey)) ?? {};
-        }
-        for (const serviceInstanceKey of ttsServiceInstanceList) {
-            config[serviceInstanceKey] = (await store.get(serviceInstanceKey)) ?? {};
-        }
-        for (const serviceInstanceKey of collectionServiceInstanceList) {
-            config[serviceInstanceKey] = (await store.get(serviceInstanceKey)) ?? {};
-        }
-        setServiceInstanceConfigMap({ ...config });
+        // 并行读：原来是四个串行 for 循环，每个 await 一次 IPC，
+        // 服务实例多的时候会把窗口首次渲染拖到几百毫秒
+        const keys = [
+            ...(translateServiceInstanceList ?? []),
+            ...(recognizeServiceInstanceList ?? []),
+            ...(ttsServiceInstanceList ?? []),
+            ...(collectionServiceInstanceList ?? []),
+        ];
+        const entries = await Promise.all(
+            keys.map(async (k) => {
+                try {
+                    return [k, (await store.get(k)) ?? {}];
+                } catch {
+                    // 单个实例读失败不能拖垮整个配置表，否则窗口一直不渲染
+                    return [k, {}];
+                }
+            })
+        );
+        setServiceInstanceConfigMap({ ...Object.fromEntries(entries) });
     };
     useEffect(() => {
         if (

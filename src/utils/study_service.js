@@ -115,7 +115,7 @@ export async function fetchModelList(inputUrl, apiKey) {
     throw new Error(errors.join('；'));
 }
 
-// 把探测命中的 models 地址换算成对话端点地址。
+// 把用户填的地址换算成对话端点地址。
 // 存储时统一用完整 /chat/completions，避开 openai 内置服务对「只填到 /v1」
 // 这样的地址二次拼 /v1 的缺陷（会变成 /v1/v1/chat/completions）。
 export function toChatCompletionsUrl(modelsUrl) {
@@ -124,6 +124,14 @@ export function toChatCompletionsUrl(modelsUrl) {
         const path = u.pathname.replace(/\/+$/, '');
         if (path.endsWith('/models')) {
             return `${u.origin}${path.replace(/\/models$/, '/chat/completions')}`;
+        }
+        // 已经是完整端点，不动
+        if (path.endsWith('/chat/completions')) {
+            return `${u.origin}${path}`;
+        }
+        // 只填到 /v1、/v1beta 这类版本目录：补全端点
+        if (/\/v\d+[a-z]*$/i.test(path)) {
+            return `${u.origin}${path}/chat/completions`;
         }
     } catch {
         // 无法解析就原样返回，交由后续调用时的校验兼错

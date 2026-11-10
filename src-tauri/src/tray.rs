@@ -152,6 +152,9 @@ fn on_clipboard_monitor_click(app: &AppHandle) {
     let current = !enable_clipboard_monitor;
     // Update Config File
     set("clipboard_monitor", current);
+    // 必须通知前端：已经打开的翻译窗口靠 useConfig 的事件同步，
+    // 收不到就会继续用旧值，结果把译文又写回剪贴板、反过来再触发一次监听
+    let _ = app.emit_all("clipboard_monitor_changed", current);
     // Update State and Start Monitor
     let state = app.state::<ClipboardMonitorEnableWrapper>();
     state

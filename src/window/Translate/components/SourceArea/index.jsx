@@ -297,7 +297,13 @@ export default function SourceArea(props) {
     }, [sourceText, sourceIsExpanded, appFontSize]);
 
     const detect_language = async (text) => {
-        setDetectLanguage(await detect(text));
+        // 检测失败（断网、接口不可用）不能挡住翻译：
+        // 之前这里 reject 会让外层 .then 不执行，译文永远不更新，也看不出为什么
+        try {
+            setDetectLanguage(await detect(text));
+        } catch {
+            // 保留上一次的检测结果，继续走翻译
+        }
     };
 
     // 定时器必须放在 ref 里：写成普通局部变量每次 render 都会重置成 null，

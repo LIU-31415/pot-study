@@ -149,19 +149,32 @@ fn translate_window() -> Window {
     } else {
         ("translate_window_width", "translate_window_height", 350, 420)
     };
-    let mut width = match get(w_key) {
-        Some(v) => v.as_i64().unwrap_or(w_default),
-        None => {
-            set(w_key, w_default);
-            w_default
+    // 「记住窗口大小」关掉时直接用默认尺寸。
+    // 之前前端不保存了，这里却照样读旧值，开关等于没效果。
+    let remember = get("translate_remember_window_size")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let mut width = if remember {
+        match get(w_key) {
+            Some(v) => v.as_i64().unwrap_or(w_default),
+            None => {
+                set(w_key, w_default);
+                w_default
+            }
         }
+    } else {
+        w_default
     };
-    let mut height = match get(h_key) {
-        Some(v) => v.as_i64().unwrap_or(h_default),
-        None => {
-            set(h_key, h_default);
-            h_default
+    let mut height = if remember {
+        match get(h_key) {
+            Some(v) => v.as_i64().unwrap_or(h_default),
+            None => {
+                set(h_key, h_default);
+                h_default
+            }
         }
+    } else {
+        h_default
     };
     // 防御：异常值（负数、过大）回退到默认，与前端校验保持一致
     if width < 200 || width > 4000 {
