@@ -233,12 +233,18 @@ export default function SourceArea(props) {
             unlisten = listen('new_text', (event) => {
                 appWindow.setFocus();
                 setTranslateMode('quick');
-                handleNewText(event.payload);
+                // 空载荷不清空内容：焦点在翻译窗口上时取不到新选区，后端会沿用旧文字，
+                // 这里再防一层，避免任何情况下把已有译文抹掉
+                if (event.payload && String(event.payload).trim()) {
+                    handleNewText(event.payload);
+                }
             });
             unlistenStudy = listen('new_text_study', (event) => {
                 appWindow.setFocus();
                 setTranslateMode('study');
-                handleNewText(event.payload);
+                if (event.payload && String(event.payload).trim()) {
+                    handleNewText(event.payload);
+                }
             });
         }
     }, [hideWindow]);

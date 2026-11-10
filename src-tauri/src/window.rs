@@ -241,16 +241,23 @@ fn translate_window() -> Window {
     window
 }
 
-pub fn selection_translate() {
+/// 取当前选区写入状态，返回本次要发给前端的文本。
+/// 取不到选区时（例如焦点在翻译窗口自己身上）沿用上一次的文字，
+/// 否则切换模式会把已有内容清空。
+fn take_selection_text(app_handle: &tauri::AppHandle) -> String {
     use selection::get_text;
-    // Get Selected Text
     let text = get_text();
-    let app_handle = APP.get().unwrap();
+    let state: tauri::State<StringWrapper> = app_handle.state();
+    let mut guard = state.0.lock().unwrap();
     if !text.trim().is_empty() {
-        // Write into State
-        let state: tauri::State<StringWrapper> = app_handle.state();
-        state.0.lock().unwrap().replace_range(.., &text);
+        guard.replace_range(.., &text);
     }
+    guard.clone()
+}
+
+pub fn selection_translate() {
+    let app_handle = APP.get().unwrap();
+    let text = take_selection_text(app_handle);
     set_mode(app_handle, "quick");
 
     let existed = app_handle.get_window("translate").is_some();
@@ -261,14 +268,8 @@ pub fn selection_translate() {
 }
 
 pub fn study_translate() {
-    use selection::get_text;
-    // Get Selected Text
-    let text = get_text();
     let app_handle = APP.get().unwrap();
-    if !text.trim().is_empty() {
-        let state: tauri::State<StringWrapper> = app_handle.state();
-        state.0.lock().unwrap().replace_range(.., &text);
-    }
+    let text = take_selection_text(app_handle);
     set_mode(app_handle, "study");
 
     let existed = app_handle.get_window("translate").is_some();
