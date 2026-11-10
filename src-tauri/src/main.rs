@@ -127,14 +127,9 @@ fn main() {
                     .show()
                     .unwrap(),
             }
-            match get("proxy_enable") {
-                Some(v) => {
-                    if v.as_bool().unwrap() && get("proxy_host").map_or(false, |host| !host.as_str().unwrap().is_empty()) {
-                        let _ = set_proxy();
-                    }
-                }
-                None => {}
-            }
+            // 代理已经在上面按 follow_system / proxy_enable / 关闭 三态处理完。
+            // 这里不能再根据 proxy_enable 单独设一次：只要历史配置里留着手动代理，
+            // 它就会把刚设好的系统代理覆盖掉，用户开了「跟随系统」却走了旧地址。
             // Check Update
             check_update(app.handle());
             if let Some(engine) = get("translate_detect_engine") {
