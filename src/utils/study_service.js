@@ -139,30 +139,40 @@ export function resolveActiveStudyService(services, id) {
 
 // 旧版配置迁移：旧版复用「服务设置」里的 OpenAI 翻译实例，
 // 取选中实例（或第一个 openai 实例）转成独立的标准化条目。
+// 只做一次：用户把服务全删光后重新进页面，不应该再被迁移回来。
 export async function buildLegacyStudyService() {
+    let result = null;
     try {
+        if ((await store.get('study_legacy_migrated')) === true) return null;
+
         const existing = await store.get('study_services');
-        if (Array.isArray(existing) && existing.length > 0) return null;
+        if (!Array.isArray(existing) || existing.length === 0) {
+            const list = (await store.get('translate_service_list')) ?? [];
+            const selectedKey = await store.get('study_translate_service');
+            const legacyModel = (await store.get('study_translate_model')) ?? '';
 
-        const list = (await store.get('translate_service_list')) ?? [];
-        const selectedKey = await store.get('study_translate_service');
-        const legacyModel = (await store.get('study_translate_model')) ?? '';
-
-        const ordered = [selectedKey, ...list.filter((k) => k !== selectedKey)].filter(Boolean);
-        for (const key of ordered) {
-            const cfg = (await store.get(key)) ?? {};
-            if (cfg?.service !== 'openai') continue;
-            if (!cfg.requestPath) continue;
-            return {
-                id: `study_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-                name: String(cfg[INSTANCE_NAME_CONFIG_KEY] || 'OpenAI 服务'),
-                url: String(cfg.requestPath),
-                apiKey: String(cfg.apiKey ?? ''),
-                model: String(legacyModel || cfg.model || ''),
-            };
+            const ordered = [selectedKey, ...list.filter((k) => k !== selectedKey)].filter(Boolean);
+            for (const key of ordered) {
+                const cfg = (await store.get(key)) ?? {};
+                if (cfg?.service !== 'openai') continue;
+                if (!cfg.requestPath) continue;
+                result = {
+                    id: `study_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+                    name: String(cfg[INSTANCE_NAME_CONFIG_KEY] || 'OpenAI 服务'),
+                    url: String(cfg.requestPath),
+                    apiKey: String(cfg.apiKey ?? ''),
+                    model: String(legacyModel || cfg.model || ''),
+                };
+                break;
+            }
         }
     } catch {
         // 迁移失败不影响页面使用，返回 null 走全新配置流程
     }
-    return null;
+    // 不管有没有找到可迁移项都标记一次，避免每次进页面重扫
+    try {
+        await store.set('study_legacy_migrated', true);
+        await store.save();
+    } catch {}
+    return result;
 }

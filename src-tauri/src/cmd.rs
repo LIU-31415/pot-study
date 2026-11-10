@@ -33,36 +33,59 @@ pub fn reload_store() {
 }
 
 #[tauri::command]
-pub fn cut_image(left: u32, top: u32, width: u32, height: u32, app_handle: tauri::AppHandle) {
+pub async fn cut_image(
+    left: u32,
+    top: u32,
+    width: u32,
+    height: u32,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    // 读整图 + 裁剪 + 写盘，几 MB 的图在主线程跑会拖慢截图后的响应。
+    // Error 里有非 Send 的 Box<dyn Error>，闭包里先降成 String。
+    match tauri::async_runtime::spawn_blocking(move || {
+        cut_image_blocking(left, top, width, height, app_handle).map_err(|e| e.to_string())
+    })
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => Err(format!("cut task failed: {e}")),
+    }
+}
+
+fn cut_image_blocking(
+    left: u32,
+    top: u32,
+    width: u32,
+    height: u32,
+    app_handle: tauri::AppHandle,
+) -> Result<(), Error> {
     use dirs::cache_dir;
     use image::GenericImage;
     info!("Cut image: {}x{}+{}+{}", width, height, left, top);
     let mut app_cache_dir_path = cache_dir().expect("Get Cache Dir Failed");
     app_cache_dir_path.push(&app_handle.config().tauri.bundle.identifier);
     app_cache_dir_path.push("pot_screenshot.png");
+    // 失败必须向上报：前端只看得到“成功”，否则会拿上一张缓存图去识别
     if !app_cache_dir_path.exists() {
-        return;
+        return Err(Error::Error("screenshot cache not found".into()));
     }
-    let mut img = match image::open(&app_cache_dir_path) {
-        Ok(v) => v,
-        Err(e) => {
-            error!("{:?}", e.to_string());
-            return;
-        }
-    };
+    let mut img = image::open(&app_cache_dir_path)?;
     let img2 = img.sub_image(left, top, width, height);
     app_cache_dir_path.pop();
     app_cache_dir_path.push("pot_screenshot_cut.png");
-    match img2.to_image().save(&app_cache_dir_path) {
-        Ok(_) => {}
-        Err(e) => {
-            error!("{:?}", e.to_string());
-        }
-    }
+    img2.to_image().save(&app_cache_dir_path)?;
+    Ok(())
 }
 
 #[tauri::command]
-pub fn get_base64(app_handle: tauri::AppHandle) -> String {
+pub async fn get_base64(app_handle: tauri::AppHandle) -> String {
+    // 读文件 + base64 编码，同样不能占主线程
+    tauri::async_runtime::spawn_blocking(move || get_base64_blocking(app_handle))
+        .await
+        .unwrap_or_default()
+}
+
+fn get_base64_blocking(app_handle: tauri::AppHandle) -> String {
     use base64::{engine::general_purpose, Engine as _};
     use dirs::cache_dir;
     use std::fs::File;
@@ -205,6 +228,8 @@ pub fn sync_system_proxy_blocking() -> Result<bool, ()> {
                 Ok(true)
             }
             None => {
+                // 跟 unset_proxy 保持一致：no_proxy 也要清，
+                // 否则关掉跟随后旧的白名单变量还留着
                 for k in [
                     "http_proxy",
                     "HTTP_PROXY",
@@ -212,6 +237,8 @@ pub fn sync_system_proxy_blocking() -> Result<bool, ()> {
                     "HTTPS_PROXY",
                     "all_proxy",
                     "ALL_PROXY",
+                    "no_proxy",
+                    "NO_PROXY",
                 ] {
                     std::env::remove_var(k);
                 }
@@ -235,7 +262,21 @@ pub async fn sync_system_proxy() -> Result<bool, ()> {
 }
 
 #[tauri::command]
-pub fn install_plugin(path_list: Vec<String>) -> Result<i32, Error> {
+pub async fn install_plugin(path_list: Vec<String>) -> Result<i32, Error> {
+    // 解压插件是同步 IO，放主线程会把安装动画卡住。
+    // Error 里有非 Send 的 Box<dyn Error>，所以闭包里先降成 String 再传出来。
+    match tauri::async_runtime::spawn_blocking(move || {
+        install_plugin_blocking(path_list).map_err(|e| e.to_string())
+    })
+    .await
+    {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(msg)) => Err(Error::Error(msg.into())),
+        Err(e) => Err(Error::Error(format!("install task failed: {e}").into())),
+    }
+}
+
+fn install_plugin_blocking(path_list: Vec<String>) -> Result<i32, Error> {
     let mut success_count = 0;
 
     for path in path_list {
@@ -265,6 +306,16 @@ pub fn install_plugin(path_list: Vec<String>) -> Result<i32, Error> {
         } else {
             return Err(Error::Error("Invalid Plugin: miss info.json".into()));
         }
+        // plugin_type 会拼进解压目标路径，必须限定为普通目录名，
+        // 否则带 .. 或绝对路径的包能把文件写到插件目录外面
+        if plugin_type.is_empty()
+            || plugin_type.contains("..")
+            || plugin_type.contains('/')
+            || plugin_type.contains('\\')
+            || plugin_type.contains(':')
+        {
+            return Err(Error::Error("Invalid Plugin: illegal plugin_type".into()));
+        }
         if zip.by_name("main.js").is_err() {
             return Err(Error::Error("Invalid Plugin: miss main.js".into()));
         }
@@ -283,7 +334,26 @@ pub fn install_plugin(path_list: Vec<String>) -> Result<i32, Error> {
 }
 
 #[tauri::command]
-pub fn run_binary(
+pub async fn run_binary(
+    plugin_type: String,
+    plugin_name: String,
+    cmd_name: String,
+    args: Vec<String>,
+) -> Result<Value, Error> {
+    // output() 会一直等到子进程退出。插件命令慢或不退时，
+    // 跑在主线程上就是整个界面冻死，所以挪到阻塞线程池。
+    match tauri::async_runtime::spawn_blocking(move || {
+        run_binary_blocking(plugin_type, plugin_name, cmd_name, args).map_err(|e| e.to_string())
+    })
+    .await
+    {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(msg)) => Err(Error::Error(msg.into())),
+        Err(e) => Err(Error::Error(format!("run_binary task failed: {e}").into())),
+    }
+}
+
+fn run_binary_blocking(
     plugin_type: String,
     plugin_name: String,
     cmd_name: String,
@@ -315,11 +385,17 @@ pub fn run_binary(
 }
 
 #[tauri::command]
-pub fn font_list() -> Result<Vec<String>, Error> {
-    use font_kit::source::SystemSource;
-    let source = SystemSource::new();
-
-    Ok(source.all_families()?)
+pub async fn font_list() -> Result<Vec<String>, Error> {
+    // 枚举系统字体在 Windows 上要几百毫秒，同步执行会卡住设置页首帧
+    let handle = tauri::async_runtime::spawn_blocking(|| {
+        use font_kit::source::SystemSource;
+        SystemSource::new().all_families()
+    });
+    match handle.await {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(e.into()),
+        Err(e) => Err(Error::from(Box::new(e) as Box<dyn std::error::Error>)),
+    }
 }
 
 #[tauri::command]

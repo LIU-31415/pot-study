@@ -246,9 +246,9 @@ export default function StudyArea() {
             setSelected(new Set());
             setIsLoading(false);
             setBatchInfo('');
-            return;
+            return undefined;
         }
-        if (!sourceLanguage || !targetLanguage || !name) return;
+        if (!sourceLanguage || !targetLanguage || !name) return undefined;
         const sentences = splitSentences(sourceText);
         if (sentences.length === 0) {
             runId.current++;
@@ -256,11 +256,16 @@ export default function StudyArea() {
             setSelected(new Set());
             setIsLoading(false);
             setBatchInfo('');
-            return;
+            return undefined;
         }
         setPairs(sentences.map((s) => ({ src: s, dst: '' })));
         setSelected(new Set());
         runTranslate(sentences);
+        // 组件卸载（切回快捷模式）或在依赖变化时让在途批次失效，
+        // 否则剩下的批次还会继续发请求，白烧 token
+        return () => {
+            runId.current++;
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [sourceText, sourceLanguage, targetLanguage, name, active?.model]);
 

@@ -300,15 +300,17 @@ export default function SourceArea(props) {
         setDetectLanguage(await detect(text));
     };
 
-    let sourceTextChangeTimer = null;
+    // 定时器必须放在 ref 里：写成普通局部变量每次 render 都会重置成 null，
+    // 连续输入时旧定时器就清不掉，会发多次检测和翻译请求
+    const sourceTextChangeTimer = useRef(null);
     const changeSourceText = async (text) => {
         setDetectLanguage('');
         await setSourceText(text);
         if (dynamicTranslate) {
-            if (sourceTextChangeTimer) {
-                clearTimeout(sourceTextChangeTimer);
+            if (sourceTextChangeTimer.current) {
+                clearTimeout(sourceTextChangeTimer.current);
             }
-            sourceTextChangeTimer = setTimeout(() => {
+            sourceTextChangeTimer.current = setTimeout(() => {
                 detect_language(text).then(() => {
                     syncSourceText();
                 });
@@ -479,7 +481,10 @@ export default function SourceArea(props) {
                                     isIconOnly
                                     isDisabled={sourceText === ''}
                                     onPress={() => {
+                                        // 只改本地值不够：atom 还留着旧内容，
+                                        // 译文区会继续显示上一段的翻译结果
                                         setSourceText('');
+                                        syncSourceText('');
                                     }}
                                 >
                                     <LuTrash2 className='text-[16px]' />

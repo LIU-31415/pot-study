@@ -89,8 +89,13 @@ export default function Screenshot() {
                         warn('Screenshot area is too small');
                         await appWindow.close();
                     } else {
-                        await invoke('cut_image', { left, top, width, height });
-                        await emit('success');
+                        try {
+                            await invoke('cut_image', { left, top, width, height });
+                            await emit('success');
+                        } catch (e) {
+                            // 裁剪失败就不发 success，避免后续拿上一张缓存图去识别
+                            warn(`cut_image failed: ${e}`);
+                        }
                         await appWindow.close();
                     }
                 }}

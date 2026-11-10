@@ -286,6 +286,8 @@ fn set_mode(app_handle: &tauri::AppHandle, mode: &str) {
 
 pub fn input_translate() {
     let app_handle = APP.get().unwrap();
+    // 显式重置模式：否则上轮学习模式残留，新窗口会按学习模式尺寸和布局打开
+    set_mode(app_handle, "quick");
     // Clear State
     let state: tauri::State<StringWrapper> = app_handle.state();
     state
@@ -332,6 +334,7 @@ pub fn study_translate_text(text: String) {
 
 pub fn image_translate() {
     let app_handle = APP.get().unwrap();
+    set_mode(app_handle, "quick");
     let state: tauri::State<StringWrapper> = app_handle.state();
     state
         .0

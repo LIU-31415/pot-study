@@ -106,10 +106,14 @@ export default function Translate() {
     const [hideLanguage] = useConfig('hide_language', false);
     const [pined, setPined] = useState(false);
     const autoPinedRef = useRef(false);
+    const prevModeRef = useRef(translateMode);
 
     // 学习模式自动钉住：避免失焦关闭后重新翻译、浪费 token
     // 依赖里带上 sourceTextValue：每次新的划词都重新钉住，即使上一轮用户手动取消过
     useEffect(() => {
+        const prevMode = prevModeRef.current;
+        prevModeRef.current = translateMode;
+
         if (translateMode === 'study' && sourceTextValue) {
             // 只有“进去之前没钉住”才算自动钉住；用户原本手动钉的不归我们管
             if (!pined) autoPinedRef.current = true;
@@ -117,15 +121,18 @@ export default function Translate() {
             unlistenBlur();
             appWindow.setAlwaysOnTop(true);
             setPined(true);
-        } else if (translateMode !== 'study' && autoPinedRef.current) {
-            // 从学习模式切回快捷模式，恢复默认的失焦关闭与快捷模式尺寸
+        } else if (translateMode !== 'study' && prevMode === 'study') {
+            // 尺寸跟着模式走，与钉住状态无关：
+            // 之前手动钉住后进学习模式，这里会因为 autoPined 为 false 而不恢复尺寸
             applyModeSize('quick');
-            if (closeOnBlur) {
-                unlisten = listenBlur();
+            if (autoPinedRef.current) {
+                if (closeOnBlur) {
+                    unlisten = listenBlur();
+                }
+                appWindow.setAlwaysOnTop(false);
+                setPined(false);
+                autoPinedRef.current = false;
             }
-            appWindow.setAlwaysOnTop(false);
-            setPined(false);
-            autoPinedRef.current = false;
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [translateMode, sourceTextValue]);
@@ -245,9 +252,13 @@ export default function Translate() {
 
     useEffect(() => {
         loadPluginList();
-        if (!unlisten) {
-            unlisten = listen('reload_plugin_list', loadPluginList);
-        }
+        // 不能复用 unlisten：它已经被 blur 监听占住了，判断永远不成立
+        const unlistenPluginList = listen('reload_plugin_list', loadPluginList);
+        return () => {
+            unlistenPluginList.then((f) => {
+                f();
+            });
+        };
     }, []);
 
     const loadServiceInstanceConfigMap = async () => {

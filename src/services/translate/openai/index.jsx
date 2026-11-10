@@ -69,6 +69,9 @@ export async function translate(text, from, to, options) {
         if (res.ok) {
             let target = '';
             const reader = res.body.getReader();
+            // 必须复用同一个 TextDecoder 并开 stream 模式：
+            // 每个网络块单独解码时，中文字符被拆到两个块会变成乱码
+            const decoder = new TextDecoder();
             try {
                 let temp = '';
                 while (true) {
@@ -77,7 +80,7 @@ export async function translate(text, from, to, options) {
                         setResult(target.trim());
                         return target.trim();
                     }
-                    const str = new TextDecoder().decode(value);
+                    const str = decoder.decode(value, { stream: true });
                     let datas = str.split('data:');
                     for (let data of datas) {
                         if (data.trim() !== '' && data.trim() !== '[DONE]') {
