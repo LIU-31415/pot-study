@@ -246,17 +246,7 @@
                 "detect_fail": "检测失败：",
                 "save_directly": "跳过检测，直接保存",
                 "cancel": "取消",
-                "url_invalid": "接口地址看起来不对，检查一下再试。",
-                "sync_label": "与翻译模式同步",
-                "sync_hint": "开启后，任一模式选择服务或模型，另一模式自动跟随同一配置。",
-                "sync_hint2": "仅 OpenAI 兼容服务双向同步；同步切换时原配置只停用并保留，不删除；其他翻译服务不会写入学习模式。",
-                "sync_hint3": "刚开启时不会立即改动任何一侧，从下一次配置改动起生效。",
-                "sync_toast_to_study": "已同步到学习模式：{{name}}",
-                "sync_toast_to_translate": "已同步到翻译模式：{{name}}",
-                "sync_replaced": "（原 {{name}} 已停用，保留在列表中）",
-                "sync_banner_close": "知道了",
-                "sync_state_on": "已开启",
-                "sync_state_off": "已关闭"
+                "url_invalid": "接口地址看起来不对，检查一下再试。"
             }
         },
         "updater": {
@@ -503,7 +493,18 @@
             "copy": "复制",
             "retry": "重试",
             "delete_newline": "删除换行",
-            "translate_back": "翻译回原文"
+            "translate_back": "翻译回原文",
+            "study_sentences": "{{n}} 句",
+            "study_batches": "{{n}} 批",
+            "study_copy_selected": "复制选中的 {{n}} 句",
+            "study_copy_all": "复制全部",
+            "study_save_selected": "保存选中的 {{n}} 句",
+            "study_save_all": "保存全部",
+            "study_no_service": "还没配置学习模式服务，去设置 → 学习模式添加一个（填接口地址和密钥即可）",
+            "study_failed": "翻译失败",
+            "study_export_prefix": "译文",
+            "expand_source": "展开原文",
+            "collapse_source": "收起原文"
         },
         "recognize": {
             "recognize": "重新识别",

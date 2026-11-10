@@ -1,6 +1,4 @@
 import {
-    Accordion,
-    AccordionItem,
     Button,
     Card,
     CardBody,
@@ -13,7 +11,6 @@ import {
     RadioGroup,
     Select,
     SelectItem,
-    Switch,
 } from '@nextui-org/react';
 import { Toaster } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
@@ -44,8 +41,6 @@ export default function Study() {
     const { t } = useTranslation();
     const [studyServices, setStudyServices] = useConfig('study_services', []);
     const [studyServiceId, setStudyServiceId] = useConfig('study_service_id', '');
-    const [syncEnabled, setSyncEnabled] = useConfig('study_sync_enabled', false);
-    const [syncNotice, setSyncNotice] = useConfig('study_sync_notice', '');
 
     const [models, setModels] = useState([]);
     const [modelLoading, setModelLoading] = useState(false);
@@ -223,18 +218,6 @@ export default function Study() {
     const modelOptions =
         models.length > 0 ? models : active?.model ? [active.model] : [];
 
-    const renderSyncNotice = (notice) => {
-        if (!notice || typeof notice !== 'object') return '';
-        const base =
-            notice.direction === 'to_study'
-                ? t('config.study.sync_toast_to_study', { name: notice.name })
-                : t('config.study.sync_toast_to_translate', { name: notice.name });
-        const suffix = notice.replaced
-            ? t('config.study.sync_replaced', { name: notice.replaced })
-            : '';
-        return `${base}${suffix}`;
-    };
-
     const modalTitle = formOpen
         ? editingId
             ? t('config.study.edit_service_title')
@@ -252,22 +235,6 @@ export default function Study() {
                             {t('config.study.service_hint')}
                         </p>
                     </div>
-
-                    {syncNotice ? (
-                        <div className='mb-3 p-2.5 rounded-lg bg-warning/15 flex items-center justify-between gap-2'>
-                            <span className='text-small text-default-600 break-all'>
-                                {renderSyncNotice(syncNotice)}
-                            </span>
-                            <Button
-                                size='sm'
-                                variant='light'
-                                className='text-default-400 shrink-0'
-                                onPress={() => setSyncNotice('')}
-                            >
-                                {t('config.study.sync_banner_close')}
-                            </Button>
-                        </div>
-                    ) : null}
 
                     {services.length === 0 ? (
                         <div className='py-6 flex flex-col items-center gap-3'>
@@ -345,44 +312,6 @@ export default function Study() {
                             )}
                         </>
                     )}
-                </CardBody>
-            </Card>
-
-            <Card>
-                <CardBody className='py-1'>
-                    <Accordion variant='light' className='px-0'>
-                        <AccordionItem
-                            key='sync'
-                            aria-label={t('config.study.sync_label')}
-                            title={t('config.study.sync_label')}
-                            subtitle={
-                                <span className='text-tiny text-default-400'>
-                                    {syncEnabled
-                                        ? t('config.study.sync_state_on')
-                                        : t('config.study.sync_state_off')}
-                                </span>
-                            }
-                        >
-                            <div className='config-item gap-3 items-center'>
-                                <p className='text-small text-default-500'>
-                                    {t('config.study.sync_hint')}
-                                </p>
-                                <Switch
-                                    isSelected={syncEnabled === true}
-                                    onValueChange={(v) => {
-                                        // 同步开关只由用户手动开启，引擎永远不会自动打开它
-                                        setSyncEnabled(v);
-                                    }}
-                                />
-                            </div>
-                            <p className='text-tiny text-default-400 mt-2'>
-                                {t('config.study.sync_hint2')}
-                            </p>
-                            <p className='text-tiny text-default-400 mt-1'>
-                                {t('config.study.sync_hint3')}
-                            </p>
-                        </AccordionItem>
-                    </Accordion>
                 </CardBody>
             </Card>
 

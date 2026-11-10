@@ -1,6 +1,7 @@
 use crate::config::get;
 use crate::config::StoreWrapper;
 use crate::error::Error;
+use crate::window::config_window;
 use crate::StringWrapper;
 use crate::APP;
 use log::{error, info};
@@ -16,6 +17,12 @@ pub fn get_text(state: tauri::State<StringWrapper>) -> String {
 #[tauri::command]
 pub fn get_translate_mode(state: tauri::State<crate::TranslateModeWrapper>) -> String {
     return state.0.lock().unwrap().to_string();
+}
+
+/// 前端打开设置窗口（学习模式未配置服务时的引导入口）
+#[tauri::command]
+pub fn open_config_window() {
+    config_window();
 }
 
 #[tauri::command]

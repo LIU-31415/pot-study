@@ -159,6 +159,7 @@ fn main() {
             reload_store,
             get_text,
             get_translate_mode,
+            open_config_window,
             cut_image,
             get_base64,
             copy_img,

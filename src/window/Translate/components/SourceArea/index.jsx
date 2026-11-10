@@ -1,4 +1,4 @@
-import { Button, Card, CardBody, CardFooter, ButtonGroup, Chip, Tooltip, Spacer } from '@nextui-org/react';
+import { Button, Card, CardBody, CardFooter, Chip, Tooltip } from '@nextui-org/react';
 import { BaseDirectory, readTextFile } from '@tauri-apps/api/fs';
 import React, { useEffect, useRef, useState } from 'react';
 import { writeText } from '@tauri-apps/api/clipboard';
@@ -480,7 +480,13 @@ export default function SourceArea(props) {
                                 </Button>
                             </Tooltip>
                             {hasOverflow && !sourceForceExpanded && (
-                                <Tooltip content={sourceIsExpanded ? '收起原文' : '展开原文'}>
+                                <Tooltip
+                                    content={
+                                        sourceIsExpanded
+                                            ? t('translate.collapse_source')
+                                            : t('translate.expand_source')
+                                    }
+                                >
                                     <Button
                                         isIconOnly
                                         variant='light'

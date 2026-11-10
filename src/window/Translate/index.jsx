@@ -17,7 +17,6 @@ import TargetArea from './components/TargetArea';
 import StudyArea from './components/StudyArea';
 import { osType } from '../../utils/env';
 import { useConfig } from '../../hooks';
-import { useStudySyncEngine } from '../../hooks/useStudySyncEngine';
 import { store } from '../../utils/store';
 import { info } from 'tauri-plugin-log-api';
 
@@ -68,8 +67,6 @@ void listen('tauri://move', () => {
 });
 
 export default function Translate() {
-    // 学习模式 × 翻译模式 双向同步引擎（幂等，开关默认关闭）
-    useStudySyncEngine();
     const [closeOnBlur] = useConfig('translate_close_on_blur', true);
     const [alwaysOnTop] = useConfig('translate_always_on_top', false);
     const [windowPosition] = useConfig('translate_window_position', 'mouse');

@@ -246,17 +246,7 @@
                 "detect_fail": "Check failed: ",
                 "save_directly": "Save without check",
                 "cancel": "Cancel",
-                "url_invalid": "The URL looks invalid. Please check it.",
-                "sync_label": "Sync with translate mode",
-                "sync_hint": "When enabled, selecting a service or model in either mode automatically follows in the other.",
-                "sync_hint2": "Only OpenAI-compatible services sync both ways; the previous config is only deactivated, never deleted. Other translate services are never written into study mode.",
-                "sync_hint3": "Enabling the switch changes nothing immediately; it takes effect from the next configuration change.",
-                "sync_toast_to_study": "Synced to study mode: {{name}}",
-                "sync_toast_to_translate": "Synced to translate mode: {{name}}",
-                "sync_replaced": " (previous {{name}} deactivated, kept in the list)",
-                "sync_banner_close": "Got it",
-                "sync_state_on": "Enabled",
-                "sync_state_off": "Disabled"
+                "url_invalid": "The URL looks invalid. Please check it."
             }
         },
         "updater": {
@@ -503,7 +493,18 @@
             "copy": "Copy",
             "retry": "Try again",
             "delete_newline": "Delete Newline",
-            "translate_back": "Translation back to the original"
+            "translate_back": "Translation back to the original",
+            "study_sentences": "{{n}} sentences",
+            "study_batches": "{{n}} batches",
+            "study_copy_selected": "Copy {{n}} selected",
+            "study_copy_all": "Copy all",
+            "study_save_selected": "Save {{n}} selected",
+            "study_save_all": "Save all",
+            "study_no_service": "No study service yet. Go to Settings → Study mode and add one (URL + API key).",
+            "study_failed": "Translation failed",
+            "study_export_prefix": "Translation",
+            "expand_source": "Expand source",
+            "collapse_source": "Collapse source"
         },
         "recognize": {
             "recognize": "Recognize",

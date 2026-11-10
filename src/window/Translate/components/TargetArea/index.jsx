@@ -4,27 +4,29 @@ import {
     CardHeader,
     CardFooter,
     Button,
-    ButtonGroup,
     Dropdown,
     DropdownItem,
     DropdownMenu,
     DropdownTrigger,
     Tooltip,
 } from '@nextui-org/react';
-import { LuChevronsDownUp, LuChevronsUpDown } from 'react-icons/lu';
+import {
+    LuArrowLeftRight,
+    LuChevronsDownUp,
+    LuChevronsUpDown,
+    LuCopy,
+    LuRefreshCw,
+    LuVolume2,
+} from 'react-icons/lu';
 import { BaseDirectory, readTextFile } from '@tauri-apps/api/fs';
 import { sendNotification } from '@tauri-apps/api/notification';
 import React, { useEffect, useState, useRef } from 'react';
 import { writeText } from '@tauri-apps/api/clipboard';
 import PulseLoader from 'react-spinners/PulseLoader';
-import { LuArrowLeftRight } from 'react-icons/lu';
-import { LuVolume2 } from 'react-icons/lu';
 import { semanticColors } from '@nextui-org/theme';
 import toast, { Toaster } from 'react-hot-toast';
-import { LuCopy } from 'react-icons/lu';
 import { useTranslation } from 'react-i18next';
 import Database from 'tauri-plugin-sql-api';
-import { LuRefreshCw } from 'react-icons/lu';
 import { useTheme } from 'next-themes';
 import { useAtomValue } from 'jotai';
 import { nanoid } from 'nanoid';
@@ -61,6 +63,9 @@ export default function TargetArea(props) {
     }
 
     const [appFontSize] = useConfig('app_font_size', 16);
+    // 字号不能写在 Tailwind 类名里（运行时插值构建时扫不到），统一用内联样式
+    const fontSizeStyle = { fontSize: `${appFontSize}px` };
+    const fontSizeSmallStyle = { fontSize: `${appFontSize - 2}px` };
     const [collectionServiceList] = useConfig('collection_service_list', []);
     const [ttsServiceList] = useConfig('tts_service_list', ['lingva_tts']);
     const [translateSecondLanguage] = useConfig('translate_second_language', 'en');
@@ -498,7 +503,8 @@ export default function TargetArea(props) {
                     <CardBody className={`p-[14px] pb-0 ${hide && 'h-0 p-0'}`}>
                         {typeof result === 'string' ? (
                             <div
-                                className={`text-[${appFontSize}px] leading-[1.65] text-foreground select-text whitespace-pre-wrap break-words`}
+                                className='leading-[1.65] text-foreground select-text whitespace-pre-wrap break-words'
+                                style={fontSizeStyle}
                             >
                                 {result}
                             </div>
@@ -510,21 +516,24 @@ export default function TargetArea(props) {
                                             <div key={nanoid()}>
                                                 {pronunciation['region'] && (
                                                     <span
-                                                        className={`text-[${appFontSize}px] mr-[12px] text-default-500`}
+                                                        className='mr-[12px] text-default-500'
+                                                        style={fontSizeStyle}
                                                     >
                                                         {pronunciation['region']}
                                                     </span>
                                                 )}
                                                 {pronunciation['symbol'] && (
                                                     <span
-                                                        className={`text-[${appFontSize}px] mr-[12px] text-default-500`}
+                                                        className='mr-[12px] text-default-500'
+                                                        style={fontSizeStyle}
                                                     >
                                                         {pronunciation['symbol']}
                                                     </span>
                                                 )}
                                                 {pronunciation['voice'] && pronunciation['voice'] !== '' && (
-                                                    <HiOutlineVolumeUp
-                                                        className={`text-[${appFontSize}px] inline-block my-auto cursor-pointer`}
+                                                    <LuVolume2
+                                                        className='inline-block my-auto cursor-pointer'
+                                                        style={fontSizeStyle}
                                                         onClick={() => {
                                                             speak(pronunciation['voice']);
                                                         }}
@@ -544,12 +553,14 @@ export default function TargetArea(props) {
                                                                 {index === 0 ? (
                                                                     <>
                                                                         <span
-                                                                            className={`text-[${appFontSize - 2}px] text-default-500 mr-[12px]`}
+                                                                            className='text-default-500 mr-[12px]'
+                                                                            style={fontSizeSmallStyle}
                                                                         >
                                                                             {explanations['trait']}
                                                                         </span>
                                                                         <span
-                                                                            className={`font-bold text-[${appFontSize}px] select-text`}
+                                                                            className='font-bold select-text'
+                                                                            style={fontSizeStyle}
                                                                         >
                                                                             {explain}
                                                                         </span>
@@ -557,7 +568,8 @@ export default function TargetArea(props) {
                                                                     </>
                                                                 ) : (
                                                                     <span
-                                                                        className={`text-[${appFontSize - 2}px] text-default-500 select-text mr-1`}
+                                                                        className='text-default-500 select-text mr-1'
+                                                                        style={fontSizeSmallStyle}
                                                                         key={nanoid()}
                                                                     >
                                                                         {explain}
@@ -574,7 +586,7 @@ export default function TargetArea(props) {
                                     result['associations'].map((association) => {
                                         return (
                                             <div key={nanoid()}>
-                                                <span className={`text-[${appFontSize}px] text-default-500`}>
+                                                <span className='text-default-500' style={fontSizeStyle}>
                                                     {association}
                                                 </span>
                                             </div>
@@ -584,13 +596,14 @@ export default function TargetArea(props) {
                                     result['sentence'].map((sentence, index) => {
                                         return (
                                             <div key={nanoid()}>
-                                                <span className={`text-[${appFontSize - 2}px] mr-[12px]`}>
+                                                <span className='mr-[12px]' style={fontSizeSmallStyle}>
                                                     {index + 1}.
                                                 </span>
                                                 <>
                                                     {sentence['source'] && (
                                                         <span
-                                                            className={`text-[${appFontSize}px] select-text`}
+                                                            className='select-text'
+                                                            style={fontSizeStyle}
                                                             dangerouslySetInnerHTML={{
                                                                 __html: sentence['source'],
                                                             }}
@@ -600,7 +613,8 @@ export default function TargetArea(props) {
                                                 <>
                                                     {sentence['target'] && (
                                                         <div
-                                                            className={`text-[${appFontSize}px] select-text text-default-500`}
+                                                            className='select-text text-default-500'
+                                                            style={fontSizeStyle}
                                                             dangerouslySetInnerHTML={{
                                                                 __html: sentence['target'],
                                                             }}
@@ -617,7 +631,8 @@ export default function TargetArea(props) {
                                 return (
                                     <p
                                         key={v}
-                                        className={`text-[${appFontSize}px] text-red-500`}
+                                        className='text-red-500'
+                                        style={fontSizeStyle}
                                     >
                                         {v}
                                     </p>

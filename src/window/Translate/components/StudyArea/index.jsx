@@ -145,7 +145,9 @@ export default function StudyArea() {
                 batches.push({ start: i, count: Math.min(BATCH_SIZE, total - i) });
             }
         }
-        setBatchInfo(batches.length > 1 ? `${batches.length} 批` : '');
+        setBatchInfo(
+            batches.length > 1 ? t('translate.study_batches', { n: batches.length }) : ''
+        );
 
         const acc = sentences.map((s) => ({ src: s, dst: '', error: '' }));
         setPairs(acc.map((p) => ({ ...p })));
@@ -207,7 +209,7 @@ export default function StudyArea() {
             } catch (e) {
                 if (runId.current !== id) return;
                 for (let i = 0; i < batch.count; i++) {
-                    acc[batch.start + i].error = '翻译失败';
+                    acc[batch.start + i].error = t('translate.study_failed');
                 }
                 setPairs(acc.map((p) => ({ ...p })));
                 throw e;
@@ -300,7 +302,7 @@ export default function StudyArea() {
         if (!items.length) return;
         const d = new Date();
         const pad = (n) => String(n).padStart(2, '0');
-        const name = `译文-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.md`;
+        const name = `${t('translate.study_export_prefix')}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.md`;
         try {
             const path = await save({
                 defaultPath: name,
@@ -345,7 +347,7 @@ export default function StudyArea() {
                         <span className='truncate'>{modelLabel || serviceLabel}</span>
                     )}
                     <span className='text-default-300'>·</span>
-                    <span>{pairs.length} 句</span>
+                    <span>{t('translate.study_sentences', { n: pairs.length })}</span>
                     {batchInfo && (
                         <>
                             <span className='text-default-300'>·</span>
@@ -355,7 +357,13 @@ export default function StudyArea() {
                     {isLoading && <Spinner size='sm' color='default' />}
                 </div>
                 <div className='flex items-center gap-1 shrink-0'>
-                    <Tooltip content={selected.size > 0 ? `复制选中的 ${selected.size} 句` : '复制全部'}>
+                    <Tooltip
+                        content={
+                            selected.size > 0
+                                ? t('translate.study_copy_selected', { n: selected.size })
+                                : t('translate.study_copy_all')
+                        }
+                    >
                         <Button
                             isIconOnly
                             variant='light'
@@ -370,7 +378,13 @@ export default function StudyArea() {
                             )}
                         </Button>
                     </Tooltip>
-                    <Tooltip content={selected.size > 0 ? `保存选中的 ${selected.size} 句` : '保存全部'}>
+                    <Tooltip
+                        content={
+                            selected.size > 0
+                                ? t('translate.study_save_selected', { n: selected.size })
+                                : t('translate.study_save_all')
+                        }
+                    >
                         <Button
                             isIconOnly
                             variant='light'
@@ -401,8 +415,21 @@ export default function StudyArea() {
                 {error ? (
                     <div className='text-[13px] text-danger py-2 break-all'>{error}</div>
                 ) : studyList.length === 0 ? (
-                    <div className='text-[13px] text-default-400 py-2'>
-                        尚未配置学习模式服务：设置 → 学习模式 → 添加服务（填接口地址和密钥即可）
+                    <div className='flex items-center justify-between gap-2 py-2'>
+                        <span className='text-[13px] text-default-400'>
+                            {t('translate.study_no_service')}
+                        </span>
+                        <Button
+                            size='sm'
+                            variant='flat'
+                            color='primary'
+                            className='shrink-0 rounded-full'
+                            onPress={() => {
+                                invoke('open_config_window').catch(() => {});
+                            }}
+                        >
+                            {t('config.study.label')}
+                        </Button>
                     </div>
                 ) : (
                     <div className='flex flex-col'>

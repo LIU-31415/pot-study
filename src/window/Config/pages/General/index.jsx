@@ -496,7 +496,7 @@ export default function General() {
             <Card>
                 <CardBody>
                     <div className='config-item'>
-                        <h3>{t('config.general.proxy.title')}</h3>
+                        <h3>{t('config.general.proxy.follow_system')}</h3>
                         {proxyFollowSystem !== null && (
                             <Switch
                                 isSelected={proxyFollowSystem}
@@ -519,7 +519,7 @@ export default function General() {
                     {!proxyFollowSystem && (
                     <>
                     <div className='config-item'>
-                        <h3>{t('config.general.proxy.follow_system')}</h3>
+                        <h3>{t('config.general.proxy.title')}</h3>
                         {proxyEnable !== null && (
                             <Switch
                                 isSelected={proxyEnable}
