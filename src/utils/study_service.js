@@ -137,6 +137,53 @@ export function resolveActiveStudyService(services, id) {
     return services.find((s) => s.id === id) ?? services[0];
 }
 
+// 已知的本地网关。magpie（github.com/yetone/magpie）固定监听 127.0.0.1:3425，
+// 说 OpenAI 兼容协议，key 用 "magpie" 占位。
+// 以后加别的本地网关（Ollama、LM Studio 等）往这个列表里塞一条就行。
+export const LOCAL_GATEWAYS = [
+    { id: 'magpie', name: 'magpie', base: 'http://127.0.0.1:3425', apiKey: 'magpie' },
+];
+
+// 本地回环探测要快：网关没开时连接会立刻失败，2.5 秒足够。
+// 不能用 fetchModelList 的多候选策略，那个要跑十几秒。
+const PROBE_TIMEOUT = 2500;
+
+async function probeModels(url, apiKey) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT);
+    try {
+        const res = await window.fetch(url, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${apiKey}` },
+            signal: ctrl.signal,
+        });
+        if (!res.ok) return null;
+        return parseModels(await res.json());
+    } catch {
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// 探测本地网关。探到返回 { id, name, base, url, apiKey, models }，否则 null。
+export async function detectLocalGateway() {
+    for (const gw of LOCAL_GATEWAYS) {
+        const models = await probeModels(`${gw.base}/v1/models`, gw.apiKey);
+        if (models && models.length > 0) {
+            return {
+                id: gw.id,
+                name: gw.name,
+                base: gw.base,
+                url: toChatCompletionsUrl(`${gw.base}/v1/models`),
+                apiKey: gw.apiKey,
+                models,
+            };
+        }
+    }
+    return null;
+}
+
 // 旧版配置迁移：旧版复用「服务设置」里的 OpenAI 翻译实例，
 // 取选中实例（或第一个 openai 实例）转成独立的标准化条目。
 // 只做一次：用户把服务全删光后重新进页面，不应该再被迁移回来。

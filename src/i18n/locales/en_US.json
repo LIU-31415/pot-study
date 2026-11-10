@@ -246,7 +246,15 @@
                 "detect_fail": "Check failed: ",
                 "save_directly": "Save without check",
                 "cancel": "Cancel",
-                "url_invalid": "The URL looks invalid. Please check it."
+                "url_invalid": "The URL looks invalid. Please check it.",
+                "detect_local": "Detect local gateway",
+                "local_hint": "magpie puts every provider behind one local address",
+                "local_found": "Found local {{name}} gateway",
+                "local_models": "{{n}} models available",
+                "local_add": "Add",
+                "local_added": "Local gateway added: {{name}}",
+                "local_exists": "This gateway is already in the list: {{name}}",
+                "local_not_found": "No local gateway found. magpie puts every provider behind one local address: github.com/yetone/magpie"
             }
         },
         "updater": {

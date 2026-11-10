@@ -246,7 +246,15 @@
                 "detect_fail": "检测失败：",
                 "save_directly": "跳过检测，直接保存",
                 "cancel": "取消",
-                "url_invalid": "接口地址看起来不对，检查一下再试。"
+                "url_invalid": "接口地址看起来不对，检查一下再试。",
+                "detect_local": "检测本地网关",
+                "local_hint": "magpie 能把多家模型聚成一个本地地址",
+                "local_found": "检测到本地 {{name}} 网关",
+                "local_models": "{{n}} 个模型可用",
+                "local_add": "添加",
+                "local_added": "已添加本地网关：{{name}}",
+                "local_exists": "这个网关已经在列表里：{{name}}",
+                "local_not_found": "没检测到本地网关。magpie 能把多家模型聚成一个本地地址，项目地址 github.com/yetone/magpie"
             }
         },
         "updater": {

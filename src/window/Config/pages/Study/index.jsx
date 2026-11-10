@@ -12,7 +12,7 @@ import {
     Select,
     SelectItem,
 } from '@nextui-org/react';
-import { Toaster } from 'react-hot-toast';
+import { Toaster, toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import React, { useEffect, useState } from 'react';
 import {
@@ -22,15 +22,17 @@ import {
     LuRefreshCw,
     LuSettings2,
     LuTrash2,
+    LuX,
 } from 'react-icons/lu';
 
-import { useConfig } from '../../../../hooks';
+import { useConfig, useToastStyle } from '../../../../hooks';
 import {
     normalizeInputUrl,
     fetchModelList,
     buildLegacyStudyService,
     resolveActiveStudyService,
     toChatCompletionsUrl,
+    detectLocalGateway,
 } from '../../../../utils/study_service';
 
 function newId() {
@@ -39,6 +41,7 @@ function newId() {
 
 export default function Study() {
     const { t } = useTranslation();
+    const toastStyle = useToastStyle();
     const [studyServices, setStudyServices] = useConfig('study_services', []);
     const [studyServiceId, setStudyServiceId] = useConfig('study_service_id', '');
 
@@ -59,8 +62,15 @@ export default function Study() {
     // 删除二次确认（3 秒内再点一次生效）
     const [pendingDelete, setPendingDelete] = useState('');
 
+    // 本地网关探测：页面打开时静默探一次，探到只给提示，不动当前生效项
+    const [localFound, setLocalFound] = useState(null);
+    const [localChecking, setLocalChecking] = useState(false);
+    // 探测是异步的，回调里要读最新的服务列表，不能用闭包里的旧值
+    const servicesRef = useRef([]);
+
     const services = studyServices ?? [];
     const active = resolveActiveStudyService(services, studyServiceId);
+    servicesRef.current = services;
 
     // 旧版配置（复用翻译服务列表）首次进入时一次性迁移
     useEffect(() => {
@@ -73,6 +83,21 @@ export default function Study() {
             }
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // 静默探测本地网关：探不到什么都不显示，不打扰用户；
+    // 已经配过同一个地址也不提示，避免重复添加的噪声
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            const gw = await detectLocalGateway();
+            if (cancelled || !gw) return;
+            if (servicesRef.current.some((s) => s.url === gw.url)) return;
+            setLocalFound(gw);
+        })();
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     const loadModels = async (entry) => {
@@ -218,6 +243,53 @@ export default function Study() {
     const modelOptions =
         models.length > 0 ? models : active?.model ? [active.model] : [];
 
+    // 手动重探：页面打开后才启动网关的情况
+    const checkLocalGateway = async () => {
+        setLocalChecking(true);
+        try {
+            const gw = await detectLocalGateway();
+            if (gw) {
+                setLocalFound(gw);
+            } else {
+                toast(t('config.study.local_not_found'), { duration: 6000, style: toastStyle });
+            }
+        } finally {
+            setLocalChecking(false);
+        }
+    };
+
+    // 添加探到的本地网关。已有别的服务时不切换生效项，
+    // 只把新条目加进列表——擅自改用户正在用的服务会很难排查。
+    const addLocalGateway = (gw) => {
+        const existing = services.find((s) => s.url === gw.url);
+        if (existing) {
+            setStudyServiceId(existing.id);
+            setLocalFound(null);
+            toast(t('config.study.local_exists', { name: existing.name }), {
+                duration: 3000,
+                style: toastStyle,
+            });
+            return;
+        }
+        const entry = {
+            id: newId(),
+            name: gw.name,
+            url: gw.url,
+            apiKey: gw.apiKey,
+            model: gw.models[0] ?? '',
+        };
+        setStudyServices([...services, entry]);
+        if (services.length === 0) {
+            setStudyServiceId(entry.id);
+        }
+        setModels(gw.models);
+        setLocalFound(null);
+        toast(t('config.study.local_added', { name: gw.name }), {
+            duration: 3000,
+            style: toastStyle,
+        });
+    };
+
     const modalTitle = formOpen
         ? editingId
             ? t('config.study.edit_service_title')
@@ -235,6 +307,58 @@ export default function Study() {
                             {t('config.study.service_hint')}
                         </p>
                     </div>
+
+                    {/* 本地网关：探到了给一条可添加的提示，探不到给个手动检测入口 */}
+                    {localFound ? (
+                        <div className='mb-3 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5 flex items-center justify-between gap-2'>
+                            <div className='min-w-0'>
+                                <p className='text-small font-medium truncate'>
+                                    {t('config.study.local_found', { name: localFound.name })}
+                                </p>
+                                <p className='text-tiny text-default-400 truncate'>
+                                    {localFound.base} ·{' '}
+                                    {t('config.study.local_models', {
+                                        n: localFound.models.length,
+                                    })}
+                                </p>
+                            </div>
+                            <div className='flex items-center gap-1 shrink-0'>
+                                <Button
+                                    size='sm'
+                                    color='primary'
+                                    variant='flat'
+                                    className='rounded-full'
+                                    onPress={() => addLocalGateway(localFound)}
+                                >
+                                    {t('config.study.local_add')}
+                                </Button>
+                                <Button
+                                    size='sm'
+                                    isIconOnly
+                                    variant='light'
+                                    className='rounded-full text-default-400'
+                                    onPress={() => setLocalFound(null)}
+                                >
+                                    <LuX className='text-[14px]' />
+                                </Button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className='mb-3 flex items-center gap-2 flex-wrap'>
+                            <Button
+                                size='sm'
+                                variant='bordered'
+                                className='rounded-full'
+                                isLoading={localChecking}
+                                onPress={checkLocalGateway}
+                            >
+                                {t('config.study.detect_local')}
+                            </Button>
+                            <span className='text-tiny text-default-400'>
+                                {t('config.study.local_hint')}
+                            </span>
+                        </div>
+                    )}
 
                     {services.length === 0 ? (
                         <div className='py-6 flex flex-col items-center gap-3'>
