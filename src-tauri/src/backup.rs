@@ -7,6 +7,16 @@ use walkdir::WalkDir;
 use zip::read::ZipArchive;
 use zip::write::SimpleFileOptions;
 
+/// 配置子目录名取自运行时 identifier。
+/// 原版这里写死了 "com.pot-app.desktop"，换个 identifier 构建的版本
+/// 备份和恢复会指向别人的配置目录。读不到时回退到原值，避免 APP 未初始化时 panic。
+fn config_subdir() -> String {
+    crate::APP
+        .get()
+        .map(|a| a.config().tauri.bundle.identifier.clone())
+        .unwrap_or_else(|| "com.pot-app.desktop".to_string())
+}
+
 #[tauri::command(async)]
 pub async fn webdav(
     operate: &str,
@@ -35,7 +45,7 @@ pub async fn webdav(
             let res = client.get(&format!("/{}", name.unwrap())).await?;
             let data = res.bytes().await?;
             let mut config_dir_path = config_dir().unwrap();
-            config_dir_path = config_dir_path.join("com.pot-app.desktop");
+            config_dir_path = config_dir_path.join(config_subdir());
             let zip_path = config_dir_path.join("archive.zip");
 
             let mut zip_file = std::fs::File::create(&zip_path)?;
@@ -52,7 +62,7 @@ pub async fn webdav(
                     return Err(Error::Error("WebDav Get Config Dir Error".into()));
                 }
             };
-            config_dir_path = config_dir_path.join("com.pot-app.desktop");
+            config_dir_path = config_dir_path.join(config_subdir());
             let zip_path = config_dir_path.join("archive.zip");
             let config_path = config_dir_path.join("config.json");
             let database_path = config_dir_path.join("history.db");
@@ -122,7 +132,7 @@ pub async fn local(operate: &str, path: String) -> Result<String, Error> {
                     return Err(Error::Error("WebDav Get Config Dir Error".into()));
                 }
             };
-            config_dir_path = config_dir_path.join("com.pot-app.desktop");
+            config_dir_path = config_dir_path.join(config_subdir());
             let config_path = config_dir_path.join("config.json");
             let database_path = config_dir_path.join("history.db");
             let plugin_path = config_dir_path.join("plugins");
@@ -160,7 +170,7 @@ pub async fn local(operate: &str, path: String) -> Result<String, Error> {
         }
         "get" => {
             let mut config_dir_path = config_dir().unwrap();
-            config_dir_path = config_dir_path.join("com.pot-app.desktop");
+            config_dir_path = config_dir_path.join(config_subdir());
 
             let mut zip_file = std::fs::File::open(&path)?;
             let mut zip = ZipArchive::new(&mut zip_file)?;
@@ -190,7 +200,7 @@ pub async fn aliyun(operate: &str, path: String, url: String) -> Result<String, 
             let res = reqwest::Client::new().get(&url).send().await?;
             let data = res.bytes().await?;
             let mut config_dir_path = config_dir().unwrap();
-            config_dir_path = config_dir_path.join("com.pot-app.desktop");
+            config_dir_path = config_dir_path.join(config_subdir());
             let zip_path = config_dir_path.join("archive.zip");
 
             let mut zip_file = std::fs::File::create(&zip_path)?;

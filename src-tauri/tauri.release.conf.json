@@ -1,0 +1,14 @@
+{
+    "package": {
+        "productName": "Pot 学习版",
+        "version": "3.0.7-lzc.1"
+    },
+    "tauri": {
+        "bundle": {
+            "identifier": "com.lzc.pot-study"
+        },
+        "updater": {
+            "active": false
+        }
+    }
+}

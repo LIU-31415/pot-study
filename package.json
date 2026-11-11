@@ -1,7 +1,9 @@
 {
-    "name": "pot",
+    "name": "pot-study",
     "private": true,
-    "version": "3.0.7",
+    "version": "3.0.7-lzc.1",
+    "description": "基于 Pot (pot-desktop) 修改的划词翻译工具，主打逐句对照的学习模式",
+    "repository": "https://github.com/你的用户名/pot-study",
     "type": "module",
     "scripts": {
         "dev": "vite",

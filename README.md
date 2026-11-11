@@ -1,18 +1,36 @@
 <img width="200px" src="public/icon.svg" align="left"/>
 
-# Pot (派了个萌的翻译器)
+# Pot 学习版
 
-> 🌈 一个跨平台的划词翻译软件 ([QQ 频道](https://pd.qq.com/s/akns94e1r))
+> 基于 [Pot (pot-desktop)](https://github.com/pot-app/pot-desktop) 修改的划词翻译工具。
+> 原项目已停止功能更新，本仓库在其基础上继续维护，主打逐句对照的学习模式。
 
-![License](https://img.shields.io/github/license/pot-app/pot-desktop.svg)
-![Tauri](https://img.shields.io/badge/Tauri-1.6.8-blue?logo=tauri)
+![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
+![Tauri](https://img.shields.io/badge/Tauri-1.8-blue?logo=tauri)
 ![JavaScript](https://img.shields.io/badge/-JavaScript-yellow?logo=javascript&logoColor=white)
 ![Rust](https://img.shields.io/badge/-Rust-orange?logo=rust&logoColor=white)
-![Windows](https://img.shields.io/badge/-Windows-blue?logo=windows&logoColor=white)
-![MacOS](https://img.shields.io/badge/-macOS-black?&logo=apple&logoColor=white)
-![Linux](https://img.shields.io/badge/-Linux-yellow?logo=linux&logoColor=white)
 
-<br/>
+## 与原版的区别
+
+- **学习模式**：选中文字按热键，按句切分、逐句对照翻译，可勾选导出
+- **多模型切换**：同一网关下直接切换模型，翻过的模型结果缓存在本地，切回不重复请求
+- **分句改进**：识别学术论文里紧贴句号的文献引用（`hydrophobic.36-38`），中文引用也不会错位
+- **稳定性修复**：窗口弹出、代理配置覆盖、插件扫描容错、流式解码乱码等十余处
+
+## 下载
+
+从 [Releases](https://github.com/你的用户名/pot-study/releases) 获取安装包。
+
+> 本版本与原版 Pot 使用不同的配置目录，两者可以同时安装，互不影响。
+
+## 授权
+
+本项目基于 Pot 修改，遵循 [GPL-3.0](LICENSE) 协议，原项目版权归 pot-app 所有。
+
+---
+
+以下为原版 README 的功能列表与支持服务，仍然适用。
+
 <hr/>
 <div align="center">
 
