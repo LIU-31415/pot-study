@@ -1,0 +1,228 @@
+name: Release
+
+# 打 v* 标签时自动构建 Windows x64 + macOS（Apple Silicon / Intel），
+# 发布安装包，并把 update.json 更新到 updater 标签的 release 里。
+# 自动更新链路：程序启动 → 读 updater 标签的 update.json → 比对版本 → 下载对应平台包 → 用内置公钥验签。
+
+on:
+    push:
+        tags:
+            - 'v*'
+    workflow_dispatch:
+        inputs:
+            version:
+                description: '版本号（不带 v），例如 3.1.0'
+                required: true
+                type: string
+
+permissions:
+    contents: write
+
+# 同一时间只跑一个发布，避免两个版本交错时旧包覆盖新包的更新清单
+concurrency:
+    group: release-${{ github.ref_name }}
+    cancel-in-progress: false
+
+env:
+    REPO: LIU-31415/pot-study
+
+jobs:
+    build-windows:
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: 解析版本号
+              id: ver
+              shell: pwsh
+              run: |
+                  if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+                    $v = '${{ github.event.inputs.version }}'
+                  } else {
+                    $v = '${{ github.ref_name }}' -replace '^v', ''
+                  }
+                  "version=$v" >> $env:GITHUB_OUTPUT
+                  Write-Host "版本: $v"
+
+            - name: 同步版本号到配置
+              shell: pwsh
+              run: |
+                  $v = '${{ steps.ver.outputs.version }}'
+                  node -e "const fs=require('fs');const set=(p,f)=>{const o=JSON.parse(fs.readFileSync(p,'utf8'));f(o);fs.writeFileSync(p,JSON.stringify(o,null,4)+'\n');};set('package.json',o=>o.version=process.argv[1]);set('src-tauri/tauri.conf.json',o=>o.package.version=process.argv[1]);set('src-tauri/tauri.release.conf.json',o=>o.package.version=process.argv[1]);" $v
+                  $cargo = Get-Content src-tauri/Cargo.toml -Raw
+                  $cargo = $cargo -replace 'version = "0.0.0"', "version = `"$v`""
+                  Set-Content src-tauri/Cargo.toml $cargo -NoNewline
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+
+            - uses: dtolnay/rust-toolchain@stable
+
+            - uses: pnpm/action-setup@v4
+              with:
+                  version: 9
+
+            - name: 安装依赖
+              run: pnpm install
+
+            - name: 构建（含 updater 包与签名）
+              shell: pwsh
+              env:
+                  # build 认的是私钥文件内容（base64），不是路径；密码空串要显式给，
+                  # 否则会去等交互输入而挂住（本机实测）
+                  TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+                  TAURI_KEY_PASSWORD: ''
+              # --bundles 显式覆盖配置里的 targets：Windows 用 nsis 打底，再出 updater 包
+              run: pnpm tauri build --config src-tauri/tauri.release.conf.json --target x86_64-pc-windows-msvc --bundles nsis,updater
+
+            - name: 重命名产物并生成更新片段
+              shell: pwsh
+              run: |
+                  $v = '${{ steps.ver.outputs.version }}'
+                  $dir = 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis'
+                  $zip = Get-ChildItem $dir -Filter '*.nsis.zip' | Select-Object -First 1
+                  if (-not $zip) { throw "找不到 .nsis.zip，构建没有产出 updater 包" }
+                  if (-not (Test-Path "$($zip.FullName).sig")) { throw "没有生成 .sig，签名没生效" }
+                  $exe = Get-ChildItem $dir -Filter '*setup.exe' | Select-Object -First 1
+                  New-Item -ItemType Directory -Force -Path out | Out-Null
+                  $newZip = "pot-study_${v}_x64-setup.nsis.zip"
+                  Copy-Item $zip.FullName "out/$newZip"
+                  Copy-Item "$($zip.FullName).sig" "out/$newZip.sig"
+                  if ($exe) { Copy-Item $exe.FullName "out/pot-study_${v}_x64-setup.exe" }
+                  node updater/gen-fragment.mjs windows-x86_64 "out/$newZip.sig" $newZip $v $env:REPO out/windows.fragment.json
+                  Get-ChildItem out | Select-Object Name, Length
+
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: win-x64
+                  path: out/*
+                  if-no-files-found: error
+
+    build-macos:
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - target: aarch64-apple-darwin
+                      key: darwin-aarch64
+                      arch: aarch64
+                      runner: macos-latest
+                    - target: x86_64-apple-darwin
+                      key: darwin-x86_64
+                      arch: x64
+                      runner: macos-15-intel
+        runs-on: ${{ matrix.runner }}
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: 解析版本号
+              id: ver
+              run: |
+                  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                    V="${{ github.event.inputs.version }}"
+                  else
+                    V="${GITHUB_REF_NAME#v}"
+                  fi
+                  echo "version=$V" >> "$GITHUB_OUTPUT"
+                  echo "版本: $V"
+
+            - name: 同步版本号到配置
+              run: |
+                  V="${{ steps.ver.outputs.version }}"
+                  node -e "const fs=require('fs');const set=(p,f)=>{const o=JSON.parse(fs.readFileSync(p,'utf8'));f(o);fs.writeFileSync(p,JSON.stringify(o,null,4)+'\n');};set('package.json',o=>o.version=process.argv[1]);set('src-tauri/tauri.conf.json',o=>o.package.version=process.argv[1]);set('src-tauri/tauri.release.conf.json',o=>o.package.version=process.argv[1]);" "$V"
+                  sed -i '' 's/version = "0.0.0"/version = "'"$V"'"/' src-tauri/Cargo.toml
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: ${{ matrix.target }}
+
+            - uses: pnpm/action-setup@v4
+              with:
+                  version: 9
+
+            - name: 安装依赖
+              run: pnpm install
+
+            - name: 构建（含 updater 包与签名）
+              env:
+                  TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+                  TAURI_KEY_PASSWORD: ''
+              # macOS 要 app（.app.tar.gz 的底座）+ dmg（安装包）+ updater（签名归档）；
+              # 不能沿用配置里的 nsis，那是 Windows 专用的
+              run: pnpm tauri build --config src-tauri/tauri.release.conf.json --target ${{ matrix.target }} --bundles app,dmg,updater
+
+            - name: 重命名产物并生成更新片段
+              run: |
+                  V="${{ steps.ver.outputs.version }}"
+                  BASE="src-tauri/target/${{ matrix.target }}/release/bundle"
+                  mkdir -p out
+                  TARGZ=$(find "$BASE/macos" -name '*.app.tar.gz' | head -n 1)
+                  if [ -z "$TARGZ" ]; then echo "找不到 .app.tar.gz"; exit 1; fi
+                  if [ ! -f "$TARGZ.sig" ]; then echo "没有生成 .sig，签名没生效"; exit 1; fi
+                  NEW="pot-study_${V}_${{ matrix.arch }}.app.tar.gz"
+                  cp "$TARGZ" "out/$NEW"
+                  cp "$TARGZ.sig" "out/$NEW.sig"
+                  DMG=$(find "$BASE/dmg" -name '*.dmg' | head -n 1 || true)
+                  if [ -n "$DMG" ]; then cp "$DMG" "out/pot-study_${V}_${{ matrix.arch }}.dmg"; fi
+                  node updater/gen-fragment.mjs ${{ matrix.key }} "out/$NEW.sig" "$NEW" "$V" "$REPO" "out/${{ matrix.key }}.fragment.json"
+                  ls -la out
+
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: mac-${{ matrix.arch }}
+                  path: out/*
+                  if-no-files-found: error
+
+    publish:
+        needs: [build-windows, build-macos]
+        runs-on: ubuntu-latest
+        if: startsWith(github.ref, 'refs/tags/')
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+
+            - name: 解析版本号
+              id: ver
+              run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+            - name: 收集产物
+              uses: actions/download-artifact@v4
+              with:
+                  path: dist
+                  merge-multiple: true
+
+            - name: 合并更新清单
+              run: |
+                  mkdir -p fragments
+                  cp dist/*.fragment.json fragments/ 2>/dev/null || true
+                  node updater/merge-fragments.mjs fragments "${{ steps.ver.outputs.version }}" update.json CHANGELOG
+                  echo "--- update.json ---"
+                  cat update.json
+
+            - name: 发布安装包
+              uses: softprops/action-gh-release@v1
+              with:
+                  tag_name: v${{ steps.ver.outputs.version }}
+                  name: v${{ steps.ver.outputs.version }}
+                  body_path: CHANGELOG
+                  files: |
+                      dist/pot-study_*setup.exe
+                      dist/pot-study_*.nsis.zip
+                      dist/pot-study_*.dmg
+                      dist/pot-study_*.app.tar.gz
+
+            - name: 更新 updater 清单
+              uses: softprops/action-gh-release@v1
+              with:
+                  tag_name: updater
+                  name: updater
+                  body: 'v${{ steps.ver.outputs.version }}'
+                  files: update.json
