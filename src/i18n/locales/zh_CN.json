@@ -252,7 +252,13 @@
                 "local_add": "添加",
                 "local_added": "已添加本地网关：{{name}}",
                 "local_exists": "这个网关已经在列表里：{{name}}",
-                "local_not_found": "没检测到本地网关。magpie 能把多家模型聚成一个本地地址，项目地址 github.com/yetone/magpie"
+                "local_not_found": "没检测到本地网关。magpie 能把多家模型聚成一个本地地址，项目地址 github.com/yetone/magpie",
+                "export_title": "导出到翻译服务",
+                "export_hint": "把当前模型写成一条翻译服务，翻译窗口直接可用，不用再填一遍",
+                "export_button": "导出",
+                "export_done": "已添加到翻译服务：{{name}}",
+                "export_exists": "已有相同地址和模型的服务：{{name}}",
+                "export_no_url": "当前服务没填接口地址，无法导出"
             }
         },
         "updater": {

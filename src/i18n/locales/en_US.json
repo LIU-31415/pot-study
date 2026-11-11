@@ -252,7 +252,13 @@
                 "local_add": "Add",
                 "local_added": "Local gateway added: {{name}}",
                 "local_exists": "This gateway is already in the list: {{name}}",
-                "local_not_found": "No local gateway found. magpie puts every provider behind one local address: github.com/yetone/magpie"
+                "local_not_found": "No local gateway found. magpie puts every provider behind one local address: github.com/yetone/magpie",
+                "export_title": "Export to translate services",
+                "export_hint": "Write the current model as a translate service so the translate window can use it directly",
+                "export_button": "Export",
+                "export_done": "Added to translate services: {{name}}",
+                "export_exists": "A service with the same URL and model already exists: {{name}}",
+                "export_no_url": "This service has no URL, cannot export"
             }
         },
         "updater": {

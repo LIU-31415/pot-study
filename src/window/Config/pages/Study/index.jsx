@@ -26,6 +26,12 @@ import {
 } from 'react-icons/lu';
 
 import { useConfig, useToastStyle } from '../../../../hooks';
+import { store } from '../../../../utils/store';
+import {
+    createServiceInstanceKey,
+    INSTANCE_NAME_CONFIG_KEY,
+} from '../../../../utils/service_instance';
+import { defaultRequestArguments } from '../../../../services/translate/openai/Config';
 import {
     normalizeInputUrl,
     fetchModelList,
@@ -34,6 +40,16 @@ import {
     toChatCompletionsUrl,
     detectLocalGateway,
 } from '../../../../utils/study_service';
+
+// 导出到翻译服务时用的默认提示词，与 openai 服务新建实例时的默认值一致
+const DEFAULT_TRANSLATE_PROMPT = [
+    {
+        role: 'system',
+        content:
+            'You are a professional translation engine, please translate the text into a colloquial, professional, elegant and fluent content, without the style of machine translation. You must only translate the text content, never interpret it.',
+    },
+    { role: 'user', content: 'Translate into $to:\n"""\n$text\n"""' },
+];
 
 function newId() {
     return `study_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -44,6 +60,11 @@ export default function Study() {
     const toastStyle = useToastStyle();
     const [studyServices, setStudyServices] = useConfig('study_services', []);
     const [studyServiceId, setStudyServiceId] = useConfig('study_service_id', '');
+    // 单向导出目标：翻译服务列表
+    const [translateServiceList, setTranslateServiceList] = useConfig(
+        'translate_service_list',
+        []
+    );
 
     const [models, setModels] = useState([]);
     const [modelLoading, setModelLoading] = useState(false);
@@ -240,6 +261,50 @@ export default function Study() {
         if (active?.id === id) {
             setStudyServiceId(next[0]?.id ?? '');
         }
+    };
+
+    // 把当前学习服务写成一条翻译服务实例（单向：只往翻译服务写，不回头改学习模式）
+    const exportToService = async () => {
+        if (!active?.url) {
+            toast(t('config.study.export_no_url'), { duration: 3000, style: toastStyle });
+            return;
+        }
+        const list = translateServiceList ?? [];
+
+        // 地址和模型都相同就不重复创建，避免点几次攒出一堆重复实例
+        for (const k of list) {
+            const cfg = (await store.get(k)) ?? {};
+            if (cfg.requestPath === active.url && (cfg.model ?? '') === (active.model ?? '')) {
+                toast(
+                    t('config.study.export_exists', {
+                        name: cfg[INSTANCE_NAME_CONFIG_KEY] || k,
+                    }),
+                    { duration: 4000, style: toastStyle }
+                );
+                return;
+            }
+        }
+
+        const key = createServiceInstanceKey('openai');
+        await store.set(key, {
+            [INSTANCE_NAME_CONFIG_KEY]: active.name || 'OpenAI',
+            service: 'openai',
+            requestPath: active.url,
+            model: active.model ?? '',
+            apiKey: active.apiKey ?? '',
+            stream: false,
+            promptList: DEFAULT_TRANSLATE_PROMPT,
+            requestArguments: defaultRequestArguments,
+        });
+        await store.save();
+
+        // 列表为空时它就是唯一可用的服务；否则追加到末尾，
+        // 不动用户当前在用的那个（翻译服务列表第一项才是激活项）
+        setTranslateServiceList(list.length === 0 ? [key] : [...list, key]);
+        toast(t('config.study.export_done', { name: active.name }), {
+            duration: 4000,
+            style: toastStyle,
+        });
     };
 
     const modelOptions =
@@ -441,6 +506,29 @@ export default function Study() {
                             )}
                         </>
                     )}
+                </CardBody>
+            </Card>
+
+            {/* 单向导出：把当前模型写成一条翻译服务，不反向回写学习模式 */}
+            <Card>
+                <CardBody className='py-3'>
+                    <div className='flex items-center justify-between gap-3'>
+                        <div className='min-w-0'>
+                            <p className='text-small'>{t('config.study.export_title')}</p>
+                            <p className='text-tiny text-default-400 mt-0.5'>
+                                {t('config.study.export_hint')}
+                            </p>
+                        </div>
+                        <Button
+                            size='sm'
+                            variant='flat'
+                            className='shrink-0 rounded-full'
+                            isDisabled={!active}
+                            onPress={exportToService}
+                        >
+                            {t('config.study.export_button')}
+                        </Button>
+                    </div>
                 </CardBody>
             </Card>
 
