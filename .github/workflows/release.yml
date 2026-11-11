@@ -207,12 +207,18 @@ jobs:
                   echo "--- update.json ---"
                   cat update.json
 
+            - name: 组装发布说明
+              run: |
+                  cat CHANGELOG > release-body.md
+                  printf '\n\n---\n\n' >> release-body.md
+                  if [ -f INSTALL.md ]; then cat INSTALL.md >> release-body.md; fi
+
             - name: 发布安装包
               uses: softprops/action-gh-release@v2
               with:
                   tag_name: v${{ steps.ver.outputs.version }}
                   name: v${{ steps.ver.outputs.version }}
-                  body_path: CHANGELOG
+                  body_path: release-body.md
                   make_latest: true
                   files: |
                       dist/pot-study_*setup.exe
