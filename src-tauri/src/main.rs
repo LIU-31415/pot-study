@@ -44,9 +44,45 @@ pub struct StringWrapper(pub Mutex<String>);
 // 当前翻译模式：quick | study
 pub struct TranslateModeWrapper(pub Mutex<String>);
 
+/// 单实例保护：绑定一个固定本地端口，绑不上说明已有实例在跑。
+/// 用端口而不是命名互斥量，是为了不依赖平台专有 API，Windows / macOS / Linux 走同一套逻辑。
+/// 端口选在高端不常见号段，被其他程序占用的概率极低。
+fn acquire_single_instance() -> Option<std::net::TcpListener> {
+    std::net::TcpListener::bind(("127.0.0.1", 52134)).ok()
+}
+
+#[cfg(target_os = "windows")]
+fn show_already_running() {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
+    let text = HSTRING::from("Pot Study 已经在运行，请不要重复启动。");
+    let title = HSTRING::from("Pot Study");
+    unsafe {
+        MessageBoxW(None, &text, &title, MB_OK | MB_ICONINFORMATION);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_already_running() {
+    eprintln!("Pot Study is already running. Please do not start it again!");
+}
+
 fn main() {
+    // 单实例：拿不到端口说明已有实例，提示后直接退出，
+    // 避免多个进程争抢全局热键、本地服务端口和配置文件。
+    let instance_lock = match acquire_single_instance() {
+        Some(lock) => lock,
+        None => {
+            show_already_running();
+            return;
+        }
+    };
+    // 锁要活到进程结束：不能 drop，否则端口立刻释放，第二个实例就能起来
+    std::mem::forget(instance_lock);
+
     tauri::Builder::default()
-        // [dev] 临时禁用单实例插件：该 git 版本在 Windows 26100 上启动即 panic（null reference）
+        // [dev] 插件版在 Windows 26100 上启动即 panic（0xC0000409），
+        // 已改用上面的端口锁实现单实例，插件暂不启用。
         // .plugin(tauri_plugin_single_instance::init(|app, _, cwd| {
         //     Notification::new(&app.config().tauri.bundle.identifier)
         //         .title("The program is already running. Please do not start it again!")
