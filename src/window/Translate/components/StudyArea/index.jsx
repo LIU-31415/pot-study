@@ -154,6 +154,8 @@ export default function StudyArea() {
     }, [pairs]);
     const runId = useRef(0);
     const lastRenderRef = useRef(0);
+    // 在跑的请求：重译/切模型/关窗口时要真取消，光靠 runId 只挡回写
+    const abortRef = useRef(null);
 
     // 翻译请求里读 ref 而不是闭包：换了模型/服务不自动重译，
     // 但下一次真正发请求时必须用最新的那个
@@ -161,12 +163,23 @@ export default function StudyArea() {
     activeRef.current = active;
     // 翻译结果按「服务 + 模型 + 语言对 + 原文」缓存：切回用过的模型直接显示，
     // 不重复花 token。纯内存，关窗口就没了。
-    const CACHE_LIMIT = 20;
+    const CACHE_LIMIT = 8;
     const cacheRef = useRef(new Map());
     const makeCacheKey = (act, text, src, tgt) =>
         `${act?.id ?? ''}\u0001${act?.model ?? ''}\u0001${src}\u0001${tgt}\u0001${text ?? ''}`;
+    // 命中也重插一次：Map 的迭代顺序是插入顺序，不刷新的话
+    // 常用的结果反而会被当成最早的删掉
+    const touchCache = (k) => {
+        const m = cacheRef.current;
+        const v = m.get(k);
+        if (v === undefined) return undefined;
+        m.delete(k);
+        m.set(k, v);
+        return v;
+    };
     const writeCache = (k, v) => {
         const m = cacheRef.current;
+        m.delete(k);
         m.set(k, v);
         // 超出上限删最早的，避免反复切模型把长文本攒在内存里
         while (m.size > CACHE_LIMIT) m.delete(m.keys().next().value);
@@ -174,35 +187,80 @@ export default function StudyArea() {
     // 当前选的模型对这段文字翻过没有：没翻过就把重译按钮变色提醒
     const [modelChanged, setModelChanged] = useState(false);
 
-    // 后台拉各服务的模型列表，供下拉分组用。失败就退回只显示默认模型
-    const serviceKey = studyList.map((s) => `${s.id}|${s.url ?? ''}`).join(',');
+    // 关窗口或切模式时取消在途请求
     useEffect(() => {
-        if (!studyList.length) return;
-        let cancelled = false;
-        (async () => {
-            const entries = await Promise.all(
-                studyList.map(async (s) => {
-                    if (!s.url) return [s.id, []];
-                    try {
-                        const { models } = await fetchModelList(s.url, s.apiKey);
-                        return [s.id, models];
-                    } catch {
-                        return [s.id, []];
-                    }
-                })
-            );
-            if (!cancelled) setServiceModels(Object.fromEntries(entries));
-        })();
         return () => {
-            cancelled = true;
+            abortRef.current?.abort();
         };
+    }, []);
+
+    // 拉模型列表：窗口打开只拉当前服务（够判断要不要显示下拉），
+    // 展开下拉时再补拉其余服务。服务多的时候避免窗口一开就并发好几个请求，
+    // 其中不可达的还要一直等到超时。
+    const [menuOpen, setMenuOpen] = useState(false);
+    const fetchedRef = useRef(new Set());
+    const loadModelsFor = async (services) => {
+        const todo = services.filter((s) => {
+            const k = `${s.id}|${s.url ?? ''}`;
+            return s.url && !fetchedRef.current.has(k);
+        });
+        if (!todo.length) return;
+        // 先打标记：同一服务不重复发请求
+        todo.forEach((s) => fetchedRef.current.add(`${s.id}|${s.url ?? ''}`));
+        const entries = await Promise.all(
+            todo.map(async (s) => {
+                try {
+                    const { models } = await fetchModelList(s.url, s.apiKey);
+                    return [s.id, models];
+                } catch {
+                    // 失败的取消标记，下次还有机会重试
+                    fetchedRef.current.delete(`${s.id}|${s.url ?? ''}`);
+                    return [s.id, []];
+                }
+            })
+        );
+        setServiceModels((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+    };
+
+    // 当前服务先拉：只有一个服务时也要靠它判断有没有多个模型可选
+    useEffect(() => {
+        if (active?.url) loadModelsFor([active]);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [serviceKey]);
+    }, [active?.id, active?.url]);
+
+    // 展开下拉时补拉其余服务
+    useEffect(() => {
+        if (menuOpen) loadModelsFor(studyList);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [menuOpen]);
+
+    // 实际目标语言：源语言自动、检测结果与目标语言相同时改用第二语言，
+    // 否则中文输入会「翻译」成中文。缓存键必须用这个值，
+    // 否则改了第二语言还会命中旧语言的译文。
+    const computeTarget = (srcLang, tgtLang, detected) => {
+        if (
+            srcLang === 'auto' &&
+            (!detected || detected === 'failed' || tgtLang === detected)
+        ) {
+            return secondLanguage;
+        }
+        return tgtLang;
+    };
 
     const runTranslate = async (sentences) => {
+        // 上一轮还在跑就取消掉，避免旧流继续占内存
+        abortRef.current?.abort();
+        // 冻结这一轮的配置：翻译途中切模型不能让后续批次改用新模型，
+        // 否则一批用 A 一批用 B，混合结果还会写进 A 的缓存
         const act = activeRef.current;
-        const cacheKey = makeCacheKey(act, sourceText, sourceLanguage, targetLanguage);
-        const cached = cacheRef.current.get(cacheKey);
+        const snapshot = { url: act?.url, apiKey: act?.apiKey, model: act?.model };
+        const effectiveTarget = computeTarget(
+            sourceLanguage,
+            targetLanguage,
+            detectLanguage
+        );
+        const cacheKey = makeCacheKey(act, sourceText, sourceLanguage, effectiveTarget);
+        const cached = touchCache(cacheKey);
         if (cached) {
             // 这段文字已经用这个模型翻过：直接展示，不发请求
             runId.current++;
@@ -215,6 +273,8 @@ export default function StudyArea() {
             return;
         }
         const id = ++runId.current;
+        const controller = new AbortController();
+        abortRef.current = controller;
         setError('');
         setIsLoading(true);
         setModelChanged(false);
@@ -239,18 +299,7 @@ export default function StudyArea() {
             const items = sentences.slice(batch.start, batch.start + batch.count);
             try {
                 const LanguageEnum = builtinServices['openai'].Language;
-
-                let to = targetLanguage;
-                // 检测结果与目标语言相同、检测失败、或还没检测出来，都改用第二语言：
-                // 否则中文输入会“翻译”成中文，看上去像没翻译
-                if (
-                    sourceLanguage === 'auto' &&
-                    (!detectLanguage ||
-                        detectLanguage === 'failed' ||
-                        targetLanguage === detectLanguage)
-                ) {
-                    to = secondLanguage;
-                }
+                const to = effectiveTarget;
                 if (!(sourceLanguage in LanguageEnum) || !(to in LanguageEnum)) {
                     throw new Error('Language not supported');
                 }
@@ -258,9 +307,9 @@ export default function StudyArea() {
                 const numbered = items.map((s, i) => `${i + 1}. ${s}`).join('\n');
                 const cfg = {
                     service: 'openai',
-                    requestPath: activeRef.current?.url ?? '',
-                    apiKey: activeRef.current?.apiKey ?? '',
-                    model: activeRef.current?.model ?? '',
+                    requestPath: snapshot.url ?? '',
+                    apiKey: snapshot.apiKey ?? '',
+                    model: snapshot.model ?? '',
                     stream: true,
                     promptList: [
                         { role: 'system', content: STUDY_SYSTEM },
@@ -275,6 +324,7 @@ export default function StudyArea() {
                     {
                         config: cfg,
                         detect: detectLanguage,
+                        signal: controller.signal,
                         setResult: (v) => {
                             if (runId.current !== id) return;
                             const map = parseNumbered(v);
@@ -323,9 +373,12 @@ export default function StudyArea() {
                     }
                 });
             await Promise.all(workers);
-            // 全部批次跑完才入缓存：中途被新请求打断的不算
+            // 全部批次跑完且没有失败才入缓存：
+            // 失败结果入缓存会导致恢复网络后重译直接命中，永远修不好
             if (runId.current === id) {
-                writeCache(cacheKey, acc.map((p) => ({ ...p })));
+                if (!acc.some((p) => p.error)) {
+                    writeCache(cacheKey, acc.map((p) => ({ ...p })));
+                }
                 setModelChanged(false);
             }
         } finally {
@@ -337,10 +390,19 @@ export default function StudyArea() {
     useEffect(() => {
         const act = activeRef.current;
         if (!act?.model || !pairsRef.current.length) return;
-        const key = makeCacheKey(act, sourceText, sourceLanguage, targetLanguage);
-        const cached = cacheRef.current.get(key);
+        const key = makeCacheKey(
+            act,
+            sourceText,
+            sourceLanguage,
+            computeTarget(sourceLanguage, targetLanguage, detectLanguage)
+        );
+        const cached = touchCache(key);
         if (cached) {
+            // 切过去的同时要把上一个模型的任务收尾，否则 spinner 会一直转
             runId.current++;
+            abortRef.current?.abort();
+            setIsLoading(false);
+            setBatchInfo('');
             setPairs(cached.map((p) => ({ ...p })));
             setSelected(new Set());
             setModelChanged(false);
@@ -350,6 +412,38 @@ export default function StudyArea() {
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [active?.id, active?.model]);
+
+    // 从「没有可用服务」到「刚添加了第一个服务」：之前没东西可翻，
+    // 现在得补一次，否则点重译也没反应（它只从已有 pairs 取句子）
+    useEffect(() => {
+        if (!name) return;
+        if (pairsRef.current.length) return;
+        if (!sourceText || !sourceText.trim()) return;
+        const sentences = splitSentences(sourceText);
+        if (sentences.length) runTranslate(sentences);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [name]);
+
+    // 删掉服务后把它的模型列表和已拉标记一起清掉，
+    // 否则反复增删会在内存里留下一堆没人用的数组
+    useEffect(() => {
+        const ids = new Set(studyList.map((s) => s.id));
+        const keys = new Set(studyList.map((s) => `${s.id}|${s.url ?? ''}`));
+        setServiceModels((prev) => {
+            const next = {};
+            let changed = false;
+            for (const [k, v] of Object.entries(prev)) {
+                if (ids.has(k)) next[k] = v;
+                else changed = true;
+            }
+            return changed ? next : prev;
+        });
+        for (const k of Array.from(fetchedRef.current)) {
+            if (!keys.has(k)) fetchedRef.current.delete(k);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [serviceKey]);
+
 
     useEffect(() => {
         if (!sourceText || !sourceText.trim()) {
@@ -458,7 +552,7 @@ export default function StudyArea() {
             <CardHeader className='flex justify-between pl-0 pr-2 pt-2.5 pb-1 bg-content1 rounded-t-[14px]'>
                 <div className='flex items-center gap-2 pl-2 text-[13px] text-default-500 min-w-0'>
                     {hasChoice ? (
-                        <Dropdown>
+                        <Dropdown onOpenChange={setMenuOpen}>
                             <DropdownTrigger>
                                 <Button
                                     size='sm'

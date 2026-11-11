@@ -3,7 +3,7 @@ import { Language } from './info';
 import { defaultRequestArguments } from './Config';
 
 export async function translate(text, from, to, options) {
-    const { config, setResult, detect } = options;
+    const { config, setResult, detect, signal } = options;
 
     let { service, requestPath, model, apiKey, stream, promptList, requestArguments } = config;
 
@@ -65,6 +65,9 @@ export async function translate(text, from, to, options) {
             method: 'POST',
             headers: headers,
             body: JSON.stringify(body),
+            // 调用方可以传 AbortSignal：重译、切模型、关窗口时取消在跑的流，
+            // 否则服务端不结束的话这个请求会一直占着内存
+            signal: signal,
         });
         if (res.ok) {
             let target = '';

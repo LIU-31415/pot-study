@@ -12,6 +12,7 @@ import Translate from './window/Translate';
 import Recognize from './window/Recognize';
 import Updater from './window/Updater';
 import { store } from './utils/store';
+import { flushAllConfigs } from './hooks/useConfig';
 import Config from './window/Config';
 import { useConfig } from './hooks';
 import './style.css';
@@ -54,6 +55,8 @@ export default function App() {
                 e.preventDefault();
             }
             if (e.key === 'Escape') {
+                // 先把合并窗口里没落盘的配置写完，再关窗口
+                await flushAllConfigs();
                 await appWindow.close();
             }
         };
