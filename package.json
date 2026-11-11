@@ -1,7 +1,7 @@
 {
     "name": "pot-study",
     "private": true,
-    "version": "3.1.0",
+    "version": "3.1.1",
     "description": "基于 Pot (pot-desktop) 修改的划词翻译工具，主打逐句对照的学习模式",
     "repository": "https://github.com/LIU-31415/pot-study",
     "type": "module",
