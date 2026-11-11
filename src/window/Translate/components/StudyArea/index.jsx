@@ -45,17 +45,38 @@ export function splitSentences(text) {
     const paragraphs = text.split(/\r?\n+/).map((s) => s.trim()).filter(Boolean);
 
     for (const para of paragraphs) {
-        // 中文：按全角句末标点切
-        if (/[\u4e00-\u9fa5]/.test(para)) {
-            const parts = para
-                .split(/(?<=[。！？；!?;])/)
-                .map((s) => s.trim())
-                .filter(Boolean);
+        // 按汉字占比判断，而不是「出现任意一个汉字」：
+        // 中英混排的段落里如果只有几个汉字，走中文分支会把后面的英文句子全合在一起
+        const cjk = (para.match(/[\u4e00-\u9fa5]/g) ?? []).length;
+        const isChinese = cjk > 0 && cjk * 3 >= para.length;
+        if (isChinese) {
+            const raw = para.split(/(?<=[。！？；!?;])/);
+            const parts = [];
+            for (const seg of raw) {
+                let s = seg.trim();
+                if (!s) continue;
+                // 句末引用编号（结果稳定。36 下一组…）要留在前一句，
+                // 不能变成下一句的开头
+                const cite = s.match(
+                    /^(\d+(?:[-\u2013,]\s?\d+)?|\[\d+(?:[-\u2013,]\s?\d+)*\])\s*(.*)$/s
+                );
+                if (cite && parts.length) {
+                    parts[parts.length - 1] += cite[1];
+                    s = cite[2].trim();
+                    if (!s) continue;
+                }
+                parts.push(s);
+            }
             out.push(...parts);
             continue;
         }
-        // 英文：按 . ! ? 后跟空白切，排除缩写
-        const chunks = para.split(/(?<=[.!?])\s+/);
+        // 英文：按 . ! ? 后跟空白切，排除缩写。
+        // 额外处理文献引用：PDF 复制出来的文本里编号常紧贴句号（hydrophobic.36-38），
+        // 中间没有空格。要求句号前是字母、后面紧跟编号，所以 0.5、3.14 不会误伤。
+        // 支持 .36 / .36-38 / .36,38 / .[36] 几种写法。
+        const chunks = para.split(
+            /(?<=[。！？])|(?<=[.!?])\s+|(?<=[A-Za-z][.!?]\d+(?:[-\u2013,]\s?\d+)*)\s+|(?<=[A-Za-z][.!?]\[\d+(?:[-\u2013,]\s?\d+)*\])\s+/
+        );
         let buf = '';
         for (const chunk of chunks) {
             buf = buf ? buf + ' ' + chunk : chunk;
@@ -68,6 +89,9 @@ export function splitSentences(text) {
                     if (!/\d\s+[A-Z]\.$/.test(buf)) continue;
                 }
             }
+            // 缩写后面直接跟编号的（Fig.3、Ref.12）不是句末，并回下一块
+            const m2 = buf.match(/([A-Za-z][A-Za-z.]*)\.(\d+(?:[-\u2013,]\s?\d+)*)$/);
+            if (m2 && ABBREVIATIONS.has(m2[1].toLowerCase().replace(/\./g, ''))) continue;
             if (buf.trim()) out.push(buf.trim());
             buf = '';
         }
