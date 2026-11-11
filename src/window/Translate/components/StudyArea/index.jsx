@@ -159,8 +159,20 @@ export default function StudyArea() {
     // 但下一次真正发请求时必须用最新的那个
     const activeRef = useRef(null);
     activeRef.current = active;
-    // 上次实际用哪个模型翻的：换模型后重译按钮变色提示
-    const [translatedModel, setTranslatedModel] = useState('');
+    // 翻译结果按「服务 + 模型 + 语言对 + 原文」缓存：切回用过的模型直接显示，
+    // 不重复花 token。纯内存，关窗口就没了。
+    const CACHE_LIMIT = 20;
+    const cacheRef = useRef(new Map());
+    const makeCacheKey = (act, text, src, tgt) =>
+        `${act?.id ?? ''}\u0001${act?.model ?? ''}\u0001${src}\u0001${tgt}\u0001${text ?? ''}`;
+    const writeCache = (k, v) => {
+        const m = cacheRef.current;
+        m.set(k, v);
+        // 超出上限删最早的，避免反复切模型把长文本攒在内存里
+        while (m.size > CACHE_LIMIT) m.delete(m.keys().next().value);
+    };
+    // 当前选的模型对这段文字翻过没有：没翻过就把重译按钮变色提醒
+    const [modelChanged, setModelChanged] = useState(false);
 
     // 后台拉各服务的模型列表，供下拉分组用。失败就退回只显示默认模型
     const serviceKey = studyList.map((s) => `${s.id}|${s.url ?? ''}`).join(',');
@@ -188,11 +200,24 @@ export default function StudyArea() {
     }, [serviceKey]);
 
     const runTranslate = async (sentences) => {
+        const act = activeRef.current;
+        const cacheKey = makeCacheKey(act, sourceText, sourceLanguage, targetLanguage);
+        const cached = cacheRef.current.get(cacheKey);
+        if (cached) {
+            // 这段文字已经用这个模型翻过：直接展示，不发请求
+            runId.current++;
+            setError('');
+            setIsLoading(false);
+            setBatchInfo('');
+            setPairs(cached.map((p) => ({ ...p })));
+            setSelected(new Set());
+            setModelChanged(false);
+            return;
+        }
         const id = ++runId.current;
         setError('');
         setIsLoading(true);
-        // 记下这次用的模型，换模型后按钮才知道该不该变色
-        setTranslatedModel(activeRef.current?.model ?? '');
+        setModelChanged(false);
 
         const total = sentences.length;
         const batches = [];
@@ -298,10 +323,33 @@ export default function StudyArea() {
                     }
                 });
             await Promise.all(workers);
+            // 全部批次跑完才入缓存：中途被新请求打断的不算
+            if (runId.current === id) {
+                writeCache(cacheKey, acc.map((p) => ({ ...p })));
+                setModelChanged(false);
+            }
         } finally {
             if (runId.current === id) setIsLoading(false);
         }
     };
+
+    // 换模型或换服务时，这段文字要是用新选的模型翻过，直接切过去看，不发请求
+    useEffect(() => {
+        const act = activeRef.current;
+        if (!act?.model || !pairsRef.current.length) return;
+        const key = makeCacheKey(act, sourceText, sourceLanguage, targetLanguage);
+        const cached = cacheRef.current.get(key);
+        if (cached) {
+            runId.current++;
+            setPairs(cached.map((p) => ({ ...p })));
+            setSelected(new Set());
+            setModelChanged(false);
+        } else {
+            // 这个模型没翻过这段：保持当前结果，只把重译按钮变色
+            setModelChanged(true);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [active?.id, active?.model]);
 
     useEffect(() => {
         if (!sourceText || !sourceText.trim()) {
@@ -346,7 +394,6 @@ export default function StudyArea() {
         studyList.length > 1 ||
         studyList.some((s) => (serviceModels[s.id]?.length ?? 0) > 1);
     // 当前选的模型和上次实际翻的不是同一个：提示重译，但不自动发请求
-    const modelChanged = pairs.length > 0 && !!modelLabel && modelLabel !== translatedModel;
 
     // 导出：选中了就只导选中的，没选就导全部
     const buildMarkdown = (items) => {
