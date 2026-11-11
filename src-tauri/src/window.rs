@@ -75,6 +75,10 @@ fn build_window(label: &str, title: &str) -> (Window, bool) {
     match app_handle.get_window(label) {
         Some(v) => {
             info!("Window existence: {}", label);
+            // 窗口可能是最小化状态（缩在任务栏），先恢复再置前，
+            // 否则用户点“设置”后只能看到任务栏图标，还得再点一下才出来
+            let _ = v.unminimize();
+            let _ = v.show();
             v.set_focus().unwrap();
             (v, true)
         }
@@ -120,6 +124,9 @@ pub fn config_window() {
         .unwrap();
     window.set_size(tauri::LogicalSize::new(800, 600)).unwrap();
     window.center().unwrap();
+    // 新建的窗口是 visible(false)，不显式 show 就只会在任务栏留个图标
+    let _ = window.show();
+    let _ = window.set_focus();
 }
 
 fn translate_window() -> Window {
@@ -387,6 +394,9 @@ pub fn recognize_window() {
         ))
         .unwrap();
     window.center().unwrap();
+    // 新建窗口默认 visible(false)，不 show 就只剩任务栏图标
+    let _ = window.show();
+    let _ = window.set_focus();
     window.emit("new_image", "").unwrap();
 }
 
@@ -486,4 +496,6 @@ pub fn updater_window() {
         .unwrap();
     window.set_size(tauri::LogicalSize::new(600, 400)).unwrap();
     window.center().unwrap();
+    let _ = window.show();
+    let _ = window.set_focus();
 }
