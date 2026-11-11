@@ -1,7 +1,7 @@
 import { readTextFile, BaseDirectory } from '@tauri-apps/api/fs';
 import { DropdownTrigger } from '@nextui-org/react';
 import { useDisclosure } from '@nextui-org/react';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { DropdownMenu } from '@nextui-org/react';
 import { DropdownItem } from '@nextui-org/react';
 import { useTranslation } from 'react-i18next';
@@ -180,7 +180,6 @@ export default function Backup() {
 
     return (
         <Card className='mb-[10px]'>
-            <Toaster />
             <CardBody>
                 <div className='config-item'>
                     <h3 className='my-auto'>{t('config.backup.type')}</h3>

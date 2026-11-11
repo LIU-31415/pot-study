@@ -3,7 +3,7 @@ import { DropdownTrigger } from '@nextui-org/react';
 import { Input, Button } from '@nextui-org/react';
 import { DropdownMenu } from '@nextui-org/react';
 import { DropdownItem } from '@nextui-org/react';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { Dropdown } from '@nextui-org/react';
 import { open } from '@tauri-apps/api/shell';
@@ -51,7 +51,6 @@ export function Config(props) {
                     );
                 }}
             >
-                <Toaster />
                 <div className='config-item'>
                     <Input
                         label={t('services.instance_name')}

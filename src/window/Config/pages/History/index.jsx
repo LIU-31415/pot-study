@@ -5,7 +5,7 @@ import { Textarea, Button } from '@nextui-org/react';
 import { appConfigDir, join } from '@tauri-apps/api/path';
 import { convertFileSrc } from '@tauri-apps/api/tauri';
 import React, { useEffect, useState } from 'react';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { Pagination } from '@nextui-org/react';
 import { useTranslation } from 'react-i18next';
 import Database from 'tauri-plugin-sql-api';
@@ -122,7 +122,6 @@ export default function History() {
     return (
         pluginList !== null && (
             <>
-                <Toaster />
                 <Table
                     fullWidth
                     hideHeader

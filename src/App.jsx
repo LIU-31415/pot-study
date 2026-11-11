@@ -1,5 +1,6 @@
 import { appWindow } from '@tauri-apps/api/window';
 import { BrowserRouter } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { warn } from 'tauri-plugin-log-api';
 import React, { useEffect } from 'react';
@@ -39,36 +40,28 @@ export default function App() {
     }, []);
 
     useEffect(() => {
-        if (devMode !== null && devMode) {
-            document.addEventListener('keydown', async (e) => {
-                let allowKeys = ['c', 'v', 'x', 'a', 'z', 'y'];
-                if (e.ctrlKey && !allowKeys.includes(e.key.toLowerCase())) {
-                    e.preventDefault();
-                }
+        const allowKeys = ['c', 'v', 'x', 'a', 'z', 'y'];
+        const handler = async (e) => {
+            if (e.ctrlKey && !allowKeys.includes(e.key.toLowerCase())) {
+                e.preventDefault();
+            }
+            if (devMode !== null && devMode) {
                 if (e.key === 'F12') {
                     await invoke('open_devtools');
                 }
-                if (e.key.startsWith('F') && e.key.length > 1) {
-                    e.preventDefault();
-                }
-                if (e.key === 'Escape') {
-                    await appWindow.close();
-                }
-            });
-        } else {
-            document.addEventListener('keydown', async (e) => {
-                let allowKeys = ['c', 'v', 'x', 'a', 'z', 'y'];
-                if (e.ctrlKey && !allowKeys.includes(e.key.toLowerCase())) {
-                    e.preventDefault();
-                }
-                if (e.key.startsWith('F') && e.key.length > 1) {
-                    e.preventDefault();
-                }
-                if (e.key === 'Escape') {
-                    await appWindow.close();
-                }
-            });
-        }
+            }
+            if (e.key.startsWith('F') && e.key.length > 1) {
+                e.preventDefault();
+            }
+            if (e.key === 'Escape') {
+                await appWindow.close();
+            }
+        };
+        document.addEventListener('keydown', handler);
+        // 之前没有 cleanup，devMode 切换一次就多挂一个监听，按键逻辑会重复执行
+        return () => {
+            document.removeEventListener('keydown', handler);
+        };
     }, [devMode]);
 
     useEffect(() => {
@@ -113,5 +106,12 @@ export default function App() {
         }
     }, [appFont, appFallbackFont, appFontSize]);
 
-    return <BrowserRouter>{windowMap[appWindow.label]}</BrowserRouter>;
+    return (
+        <BrowserRouter>
+            {/* 全局只挂一个 Toaster：每个页面各挂一个时，切换页面会让
+                还没过期的 toast 在新 Toaster 上重放一遍，看着像反复弹出 */}
+            <Toaster />
+            {windowMap[appWindow.label]}
+        </BrowserRouter>
+    );
 }

@@ -1,7 +1,7 @@
 import { Input, Button, Switch, Textarea, Card, CardBody, Link, Tooltip, Progress } from '@nextui-org/react';
 import { INSTANCE_NAME_CONFIG_KEY } from '../../../utils/service_instance';
 import { LuTrash2 } from 'react-icons/lu';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { open } from '@tauri-apps/api/shell';
 import React, { useEffect, useState } from 'react';
@@ -100,7 +100,6 @@ export function Config(props) {
                     );
                 }}
             >
-                <Toaster />
                 <div className='config-item'>
                     <Input
                         label={t('services.instance_name')}

@@ -24,7 +24,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { writeText } from '@tauri-apps/api/clipboard';
 import PulseLoader from 'react-spinners/PulseLoader';
 import { semanticColors } from '@nextui-org/theme';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import Database from 'tauri-plugin-sql-api';
 import { useTheme } from 'next-themes';
@@ -383,7 +383,6 @@ export default function TargetArea(props) {
             shadow='none'
             className='rounded-[14px] border border-content3/60'
         >
-            <Toaster />
             <CardHeader
                 className={`flex justify-between py-1 px-0 bg-content1 h-[32px] ${hide ? 'rounded-[14px]' : 'rounded-t-[14px]'}`}
                 {...drag}

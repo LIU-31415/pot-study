@@ -3,7 +3,7 @@ import { checkUpdate, installUpdate } from '@tauri-apps/api/updater';
 import React, { useEffect, useState } from 'react';
 import { appWindow } from '@tauri-apps/api/window';
 import { relaunch } from '@tauri-apps/api/process';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
 import ReactMarkdown from 'react-markdown';
@@ -60,7 +60,6 @@ export default function Updater() {
                 osType === 'Linux' && 'rounded-[14px] border-1 border-default-100'
             }`}
         >
-            <Toaster />
             <div className='p-[5px] h-[35px] w-full select-none cursor-default'>
                 <div
                     data-tauri-drag-region='true'

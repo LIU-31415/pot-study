@@ -12,7 +12,7 @@ import {
     Select,
     SelectItem,
 } from '@nextui-org/react';
-import { Toaster, toast } from 'react-hot-toast';
+import { toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -287,7 +287,8 @@ export default function Study() {
 
         const key = createServiceInstanceKey('openai');
         await store.set(key, {
-            [INSTANCE_NAME_CONFIG_KEY]: active.name || 'OpenAI',
+            // 实例名用模型名：服务名（如 magpie）在服务列表里认不出具体跑的是哪个模型
+            [INSTANCE_NAME_CONFIG_KEY]: active.model || active.name || 'OpenAI',
             service: 'openai',
             requestPath: active.url,
             model: active.model ?? '',
@@ -368,7 +369,6 @@ export default function Study() {
 
     return (
         <>
-            <Toaster />
             <Card className='mb-[10px]'>
                 <CardBody>
                     <div className='mb-3'>

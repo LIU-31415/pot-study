@@ -1,5 +1,5 @@
 import { unregister, isRegistered } from '@tauri-apps/api/globalShortcut';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { CardBody } from '@nextui-org/react';
 import { Button } from '@nextui-org/react';
@@ -119,7 +119,6 @@ export default function Hotkey() {
 
     return (
         <Card>
-            <Toaster />
             <CardBody>
                 <div className='config-item'>
                     <h3 className='my-auto'>{t('config.hotkey.selection_translate')}</h3>

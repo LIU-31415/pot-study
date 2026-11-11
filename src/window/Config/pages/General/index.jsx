@@ -1,7 +1,7 @@
 import { enable, isEnabled, disable } from 'tauri-plugin-autostart-api';
 import { DropdownTrigger } from '@nextui-org/react';
 import React, { useState, useEffect } from 'react';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { DropdownMenu } from '@nextui-org/react';
 import { DropdownItem } from '@nextui-org/react';
 import { useTranslation } from 'react-i18next';
@@ -80,7 +80,6 @@ export default function General() {
 
     return (
         <>
-            <Toaster />
             <Card className='mb-[10px]'>
                 <CardBody>
                     <div className='config-item'>

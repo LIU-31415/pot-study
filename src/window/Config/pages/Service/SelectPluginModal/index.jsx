@@ -1,7 +1,7 @@
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Button } from '@nextui-org/react';
 import { removeDir, BaseDirectory } from '@tauri-apps/api/fs';
 import { open as openInBrowser } from '@tauri-apps/api/shell';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { LuTrash2 } from 'react-icons/lu';
 import { useTranslation } from 'react-i18next';
 import { open } from '@tauri-apps/api/dialog';
@@ -24,7 +24,6 @@ export default function SelectPluginModal(props) {
             onOpenChange={onOpenChange}
             scrollBehavior='inside'
         >
-            <Toaster />
             <ModalContent className='max-h-[80vh]'>
                 {(onClose) => (
                     <>

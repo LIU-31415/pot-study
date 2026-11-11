@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { writeText } from '@tauri-apps/api/clipboard';
 import { LuVolume2 } from 'react-icons/lu';
 import { appWindow } from '@tauri-apps/api/window';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { listen } from '@tauri-apps/api/event';
 import { LuCopy } from 'react-icons/lu';
 import { LuWrapText } from 'react-icons/lu';
@@ -419,7 +419,6 @@ export default function SourceArea(props) {
                 shadow='none'
                 className='bg-content1 rounded-[14px] mt-[1px] pb-0'
             >
-                <Toaster />
                 <CardBody className='bg-content1 p-[14px] pb-0 max-h-[40vh] overflow-y-auto'>
                     <textarea
                         autoFocus

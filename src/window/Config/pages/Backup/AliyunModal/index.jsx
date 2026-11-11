@@ -1,7 +1,7 @@
 import { Modal, ModalContent, ModalHeader, ModalBody, Button, Skeleton } from '@nextui-org/react';
 import React, { useEffect, useState } from 'react';
 import { LuTrash2 } from 'react-icons/lu';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 
 import { useToastStyle } from '../../../../../hooks';
@@ -66,7 +66,6 @@ export default function AliyunModal(props) {
             onOpenChange={onOpenChange}
             scrollBehavior='inside'
         >
-            <Toaster />
             <ModalContent className='max-h-[80vh]'>
                 {(onClose) => (
                     <>
