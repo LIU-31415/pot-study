@@ -565,16 +565,19 @@ export default function Study() {
                                 </Button>
                             </div>
 
-                            {/* 手填入口：列表拿不到、或想用列表外的模型时直接写模型名 */}
-                            <Input
-                                label={t('config.study.model_manual')}
-                                className='mt-2'
-                                size='sm'
-                                value={active?.model ?? ''}
-                                onValueChange={(v) => pickModel(v)}
-                                placeholder='GLM-5.3-Flash'
-                                description={t('config.study.model_manual_hint')}
-                            />
+                            {/* 手填入口：只在模型列表拿不到时出现。列表正常时下拉已经能选全部，
+                                再放一个同值输入框只会让人问「这是干啥的」。加载中不显示，避免闪烁 */}
+                            {models.length === 0 && !modelLoading && (
+                                <Input
+                                    label={t('config.study.model_manual')}
+                                    className='mt-2'
+                                    size='sm'
+                                    value={active?.model ?? ''}
+                                    onValueChange={(v) => pickModel(v)}
+                                    placeholder='GLM-5.3-Flash'
+                                    description={t('config.study.model_manual_hint')}
+                                />
+                            )}
 
                             {reasoningAvailable && (
                                 <div className='mt-3'>
