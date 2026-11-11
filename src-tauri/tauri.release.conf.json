@@ -8,7 +8,7 @@
     },
     "tauri": {
         "bundle": {
-            "identifier": "com.pot-app.desktop",
+            "identifier": "com.lzc.pot-study",
             "targets": [
                 "nsis",
                 "updater"

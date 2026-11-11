@@ -8,9 +8,93 @@ use tauri_plugin_store::{Store, StoreBuilder};
 
 pub struct StoreWrapper(pub Mutex<Store<Wry>>);
 
+/// 把旧版本留下的应用数据搬到当前 identifier 目录下。
+///
+/// 背景：3.0.7-lzc.1 用 com.lzc.pot-study，3.1.0 改成了 com.pot-app.desktop。
+/// 后者与原版 Pot 完全同标识，同时安装会共用配置、抢热键，所以改回独立标识。
+/// 代价是装过 3.1.0 的用户需要迁移一次。
+///
+/// 甄别：原版 Pot 的配置里没有 study_services 字段，有它才是 Pot Study 的数据，
+/// 避免把原版 Pot 的配置误搬过来。目标已有配置时直接返回，不覆盖现有数据。
+fn migrate_legacy_config(identifier: &str) {
+    let base = match config_dir() {
+        Some(v) => v,
+        None => return,
+    };
+    let target_dir = base.join(identifier);
+    let target_cfg = target_dir.join("config.json");
+
+    if target_cfg.exists() {
+        return;
+    }
+
+    let legacy_id = "com.pot-app.desktop";
+    if legacy_id == identifier {
+        return;
+    }
+    let legacy_dir = base.join(legacy_id);
+    let legacy_cfg = legacy_dir.join("config.json");
+    if !legacy_cfg.exists() {
+        return;
+    }
+
+    let content = match std::fs::read_to_string(&legacy_cfg) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    if !content.contains("\"study_services\"") {
+        info!("legacy dir belongs to original Pot, skip migration");
+        return;
+    }
+
+    // 先备份再复制，迁移出问题还能找回
+    let _ = std::fs::copy(&legacy_cfg, legacy_dir.join("config.json.pre-migrate.bak"));
+
+    if std::fs::create_dir_all(&target_dir).is_err() {
+        warn!("migrate: cannot create target dir");
+        return;
+    }
+    if let Err(e) = std::fs::copy(&legacy_cfg, &target_cfg) {
+        warn!("migrate: copy config failed: {:?}", e);
+        return;
+    }
+
+    // 历史记录和插件一起搬，保证翻译历史和朗读可用
+    for name in ["history.db", "history.db-shm", "history.db-wal"] {
+        let src = legacy_dir.join(name);
+        if src.exists() {
+            let _ = std::fs::copy(&src, target_dir.join(name));
+        }
+    }
+    let legacy_plugins = legacy_dir.join("plugins");
+    if legacy_plugins.is_dir() {
+        if let Err(e) = copy_dir(&legacy_plugins, &target_dir.join("plugins")) {
+            warn!("migrate: copy plugins failed: {:?}", e);
+        }
+    }
+    info!("migrated config from {} to {}", legacy_id, identifier);
+}
+
+fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let to = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &to)?;
+        } else {
+            std::fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn init_config(app: &mut tauri::App) {
+    let identifier = app.config().tauri.bundle.identifier.clone();
+    // 先把旧版本的数据搬过来，再读配置
+    migrate_legacy_config(&identifier);
     let config_path = config_dir().unwrap();
-    let config_path = config_path.join(app.config().tauri.bundle.identifier.clone());
+    let config_path = config_path.join(&identifier);
     let config_path = config_path.join("config.json");
     info!("Load config from: {:?}", config_path);
     let mut store = StoreBuilder::new(app.handle(), config_path).build();
