@@ -165,7 +165,12 @@ export default function StudyArea() {
                 const LanguageEnum = builtinServices['openai'].Language;
 
                 let to = targetLanguage;
-                if (sourceLanguage === 'auto' && targetLanguage === detectLanguage) {
+                // 检测结果与目标语言相同（或还没检测出来）时改用第二语言，
+                // 否则中文输入会“翻译”成中文，看上去像没翻译
+                if (
+                    sourceLanguage === 'auto' &&
+                    (!detectLanguage || targetLanguage === detectLanguage)
+                ) {
                     to = secondLanguage;
                 }
                 if (!(sourceLanguage in LanguageEnum) || !(to in LanguageEnum)) {
@@ -256,6 +261,9 @@ export default function StudyArea() {
             return undefined;
         }
         if (!sourceLanguage || !targetLanguage || !name) return undefined;
+        // 源语言是 auto 时必须等检测结果：没检测出来就往下走，
+        // to 会算成当前目标语言（中文），结果变成「中文改写中文」
+        if (sourceLanguage === 'auto' && !detectLanguage) return undefined;
         const sentences = splitSentences(sourceText);
         if (sentences.length === 0) {
             runId.current++;
@@ -274,7 +282,7 @@ export default function StudyArea() {
             runId.current++;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sourceText, sourceLanguage, targetLanguage, name, active?.model]);
+    }, [sourceText, sourceLanguage, targetLanguage, name, active?.model, detectLanguage]);
 
     const serviceLabel = active?.name || '-';
     const modelLabel = active?.model || '';
