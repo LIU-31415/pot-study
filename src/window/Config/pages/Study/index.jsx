@@ -39,6 +39,7 @@ import {
     resolveActiveStudyService,
     toChatCompletionsUrl,
     detectLocalGateway,
+    isLocalGatewayUrl,
 } from '../../../../utils/study_service';
 
 // 导出到翻译服务时用的默认提示词，与 openai 服务新建实例时的默认值一致
@@ -96,6 +97,9 @@ export default function Study() {
 
     const services = studyServices ?? [];
     const active = resolveActiveStudyService(services, studyServiceId);
+    // 思考强度只对本地 magpie 网关开放：reasoning 是它的私有字段，
+    // 第三方服务不认（不报错但会忽略），所以那些服务上不显示这个选项，跟随对方默认
+    const reasoningAvailable = isLocalGatewayUrl(active?.url);
     servicesRef.current = services;
 
     // 旧版配置（复用翻译服务列表）首次进入时一次性迁移
@@ -171,6 +175,14 @@ export default function Study() {
         if (!active) return;
         setStudyServices(
             services.map((s) => (s.id === active.id ? { ...s, model } : s))
+        );
+    };
+
+    // 思考强度写回当前服务条目：'off' 关闭思考，其余给 effort，空串表示跟随模型默认
+    const pickReasoning = (reasoningEffort) => {
+        if (!active) return;
+        setStudyServices(
+            services.map((s) => (s.id === active.id ? { ...s, reasoningEffort } : s))
         );
     };
 
@@ -545,6 +557,34 @@ export default function Study() {
                                     <LuRefreshCw className='text-[16px]' />
                                 </Button>
                             </div>
+
+                            {reasoningAvailable && (
+                                <div className='mt-3'>
+                                    <Select
+                                        label={t('config.study.reasoning')}
+                                        selectedKeys={[active?.reasoningEffort || 'default']}
+                                        onSelectionChange={(keys) => {
+                                            const v = String(Array.from(keys)[0] ?? 'default');
+                                            pickReasoning(v === 'default' ? '' : v);
+                                        }}
+                                        isDisabled={!active}
+                                    >
+                                        <SelectItem key='default'>
+                                            {t('config.study.reasoning_default')}
+                                        </SelectItem>
+                                        <SelectItem key='off'>
+                                            {t('config.study.reasoning_off')}
+                                        </SelectItem>
+                                        <SelectItem key='low'>low</SelectItem>
+                                        <SelectItem key='medium'>medium</SelectItem>
+                                        <SelectItem key='high'>high</SelectItem>
+                                        <SelectItem key='max'>max</SelectItem>
+                                    </Select>
+                                    <p className='text-tiny text-default-400 mt-2 leading-relaxed'>
+                                        {t('config.study.reasoning_hint')}
+                                    </p>
+                                </div>
+                            )}
 
                             {modelError && (
                                 <p className='text-tiny text-danger mt-2 break-all'>

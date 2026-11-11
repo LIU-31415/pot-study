@@ -23,7 +23,8 @@ import * as builtinServices from '../../../../services/translate';
 import { useConfig } from '../../../../hooks';
 import { sourceTextAtom, detectLanguageAtom } from '../SourceArea';
 import { sourceLanguageAtom, targetLanguageAtom } from '../LanguageArea';
-import { resolveActiveStudyService, fetchModelList } from '../../../../utils/study_service';
+import { resolveActiveStudyService, fetchModelList, isLocalGatewayUrl } from '../../../../utils/study_service';
+import { defaultRequestArguments } from '../../../../services/translate/openai/Config';
 
 // 常见缩写：句号后不当作句子边界
 const ABBREVIATIONS = new Set([
@@ -128,6 +129,19 @@ const BATCH_SIZE = 20;
 const MAX_SINGLE = 30;
 const MAX_PARALLEL = 3;
 
+// 思考强度：推理模型回答前会先走一遍思考链，翻译这种直译任务里那段基本白费时间。
+// 'off' 用 enabled:false 表达，其余给 effort；空值或未知值不传，跟随模型默认。
+// 只对本地 magpie 网关生效：reasoning 是它的私有写法，第三方服务不认这个字段
+// （不报错，但会默默忽略），所以别家一律不发，跟随对方默认。
+const REASONING_EFFORTS = ['low', 'medium', 'high', 'max'];
+function buildRequestArguments(url, effort) {
+    const base = JSON.parse(defaultRequestArguments);
+    if (!isLocalGatewayUrl(url)) return base;
+    if (effort === 'off') return { ...base, reasoning: { enabled: false } };
+    if (REASONING_EFFORTS.includes(effort)) return { ...base, reasoning: { effort } };
+    return base;
+}
+
 export default function StudyArea() {
     const sourceText = useAtomValue(sourceTextAtom);
     const sourceLanguage = useAtomValue(sourceLanguageAtom);
@@ -135,7 +149,7 @@ export default function StudyArea() {
     const detectLanguage = useAtomValue(detectLanguageAtom);
     const [appFontSize] = useConfig('app_font_size', 16);
     const [secondLanguage] = useConfig('translate_second_language', 'en');
-    const [studyServices] = useConfig('study_services', []);
+    const [studyServices, setStudyServices] = useConfig('study_services', []);
     const [studyServiceId, setStudyServiceId] = useConfig('study_service_id', '');
     // 复制/导出的内容形态：both = 原文+译文，target = 仅译文
     const [copyMode, setCopyMode] = useConfig('study_copy_mode', 'both');
@@ -148,13 +162,45 @@ export default function StudyArea() {
 
     // 学习模式的服务独立配置（OpenAI 兼容格式），不再复用翻译服务列表
     const studyList = studyServices ?? [];
-    // 按服务记住上次选的模型：同一个网关里有多个模型时，窗口内就能切
-    // 不回写服务条目，设置页里那条配置不受影响
+    // 模型只存一处：服务条目里的 model。窗口里切换等于改设置，两边始终一致。
     const [studyModelMap, setStudyModelMap] = useConfig('study_model_map', {});
     const modelMap = studyModelMap ?? {};
+    // 旧版把窗口选的模型单独存在 study_model_map 里，设置页读不到，两边长期不同步。
+    // 迁移分两步：先把值写回服务条目，确认条目真带上了这些值，再清旧 map。
+    // 一步做完会有「map 清了、条目没写进去」的丢数据路径，所以拆开。
+    const modelMigratedRef = useRef(false);
+    useEffect(() => {
+        if (modelMigratedRef.current) return;
+        if (Object.keys(modelMap).length === 0) return;
+        // 服务列表还没从 store 读出来时不能动：否则会把 map 清掉却写不回条目
+        if (studyList.length === 0) return;
+        const next = studyList.map((s) =>
+            modelMap[s.id] && modelMap[s.id] !== s.model ? { ...s, model: modelMap[s.id] } : s
+        );
+        modelMigratedRef.current = true;
+        if (next.some((s, i) => s.model !== studyList[i].model)) {
+            setStudyServices(next);
+            return;
+        }
+        // 没有要写的（服务已含目标值，或该服务已删）：直接清
+        setStudyModelMap({});
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [studyModelMap, studyServices]);
+
+    // 迁移第二步：服务条目确认带上 map 里的值之后，才清空旧 map
+    useEffect(() => {
+        if (!modelMigratedRef.current) return;
+        if (Object.keys(modelMap).length === 0) return;
+        const applied = Object.entries(modelMap).every(([id, m]) => {
+            const s = studyList.find((x) => x.id === id);
+            return !s || s.model === m;
+        });
+        if (applied) setStudyModelMap({});
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [studyServices, studyModelMap]);
     const baseActive = resolveActiveStudyService(studyList, studyServiceId);
     const name = baseActive?.id ?? '';
-    // 覆盖模型后的生效配置：后面所有请求都读这个
+    // 生效配置：迁移后 map 为空，这里只作兜底，防止迁移写盘失败时丢模型
     const active = baseActive
         ? { ...baseActive, model: modelMap[baseActive.id] || baseActive.model }
         : null;
@@ -192,7 +238,7 @@ export default function StudyArea() {
     const CACHE_LIMIT = 8;
     const cacheRef = useRef(new Map());
     const makeCacheKey = (act, text, src, tgt) =>
-        `${act?.id ?? ''}\u0001${act?.model ?? ''}\u0001${src}\u0001${tgt}\u0001${text ?? ''}`;
+        `${act?.id ?? ''}\u0001${act?.url ?? ''}\u0001${act?.model ?? ''}\u0001${act?.reasoningEffort ?? ''}\u0001${src}\u0001${tgt}\u0001${text ?? ''}`;
     // 命中也重插一次：Map 的迭代顺序是插入顺序，不刷新的话
     // 常用的结果反而会被当成最早的删掉
     const touchCache = (k) => {
@@ -279,7 +325,12 @@ export default function StudyArea() {
         // 冻结这一轮的配置：翻译途中切模型不能让后续批次改用新模型，
         // 否则一批用 A 一批用 B，混合结果还会写进 A 的缓存
         const act = activeRef.current;
-        const snapshot = { url: act?.url, apiKey: act?.apiKey, model: act?.model };
+        const snapshot = {
+            url: act?.url,
+            apiKey: act?.apiKey,
+            model: act?.model,
+            reasoningEffort: act?.reasoningEffort,
+        };
         const effectiveTarget = computeTarget(
             sourceLanguage,
             targetLanguage,
@@ -337,6 +388,9 @@ export default function StudyArea() {
                     apiKey: snapshot.apiKey ?? '',
                     model: snapshot.model ?? '',
                     stream: true,
+                    requestArguments: JSON.stringify(
+                        buildRequestArguments(snapshot.url, snapshot.reasoningEffort)
+                    ),
                     promptList: [
                         { role: 'system', content: STUDY_SYSTEM },
                         { role: 'user', content: STUDY_USER },
@@ -367,6 +421,13 @@ export default function StudyArea() {
                         },
                     }
                 );
+                // 本批结束：没拿到译文的句子按失败处理。
+                // 上游用流内 error 事件或截断收尾时，解析会得到空译文且不报错，
+                // 不拦的话空白结果会被当成成功写进缓存，重译也命中它。
+                items.forEach((s, i) => {
+                    const gi = batch.start + i;
+                    if (!acc[gi].dst) acc[gi].error = t('translate.study_failed');
+                });
                 // 本批结束，强制渲染一次，避免节流漏掉最后一段
                 if (runId.current === id) {
                     lastRenderRef.current = 0;
@@ -405,7 +466,14 @@ export default function StudyArea() {
                 if (!acc.some((p) => p.error)) {
                     writeCache(cacheKey, acc.map((p) => ({ ...p })));
                 }
-                setModelChanged(false);
+                // 翻译途中换了模型或思考强度：这轮结果是旧配置跑的，
+                // 不能把「当前配置还没应用」的提示清掉，否则用户会以为新设置已经生效
+                const cur = activeRef.current;
+                const sameConfig =
+                    cur?.id === act?.id &&
+                    cur?.model === snapshot.model &&
+                    (cur?.reasoningEffort ?? '') === (snapshot.reasoningEffort ?? '');
+                if (sameConfig) setModelChanged(false);
             }
         } finally {
             if (runId.current === id) setIsLoading(false);
@@ -437,7 +505,7 @@ export default function StudyArea() {
             setModelChanged(true);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [active?.id, active?.model]);
+    }, [active?.id, active?.model, active?.reasoningEffort]);
 
     // 从「没有可用服务」到「刚添加了第一个服务」：之前没东西可翻，
     // 现在得补一次，否则点重译也没反应（它只从已有 pairs 取句子）
@@ -600,7 +668,12 @@ export default function StudyArea() {
                                     const sid = key.slice(0, sep);
                                     const m = key.slice(sep + 2);
                                     if (sid !== name) setStudyServiceId(sid);
-                                    setStudyModelMap({ ...modelMap, [sid]: m });
+                                    // 写回服务条目：模型只有这一份，设置页会同步看到
+                                    setStudyServices(
+                                        studyList.map((s) =>
+                                            s.id === sid ? { ...s, model: m } : s
+                                        )
+                                    );
                                 }}
                             >
                                 {studyList.map((s) => {

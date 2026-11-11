@@ -152,6 +152,29 @@ export const LOCAL_GATEWAYS = [
     { id: 'magpie', name: 'magpie', base: 'http://127.0.0.1:3425', apiKey: 'magpie' },
 ];
 
+// 判断一个接口地址是不是指向本地网关（magpie）。
+// 思考强度用的是 magpie 自己的 reasoning 字段，第三方服务不认这个写法（不报错但会忽略），
+// 所以只在本地网关上才显示、才发送，别家一律跟随对方默认。
+// hostname 允许 127.0.0.1 / localhost / ::1，端口必须和网关一致。
+export function isLocalGatewayUrl(url) {
+    if (!url) return false;
+    let u;
+    try {
+        u = new URL(String(url));
+    } catch {
+        return false;
+    }
+    const host = u.hostname.replace(/^\[|\]$/g, '');
+    if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') return false;
+    return LOCAL_GATEWAYS.some((gw) => {
+        try {
+            return new URL(gw.base).port === u.port;
+        } catch {
+            return false;
+        }
+    });
+}
+
 // 本地回环探测要快：网关没开时连接会立刻失败，2.5 秒足够。
 // 不能用 fetchModelList 的多候选策略，那个要跑十几秒。
 const PROBE_TIMEOUT = 2500;

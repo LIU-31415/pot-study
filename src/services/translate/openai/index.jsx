@@ -75,46 +75,50 @@ export async function translate(text, from, to, options) {
             // 必须复用同一个 TextDecoder 并开 stream 模式：
             // 每个网络块单独解码时，中文字符被拆到两个块会变成乱码
             const decoder = new TextDecoder();
+            // SSE 是按行走的协议：空行分隔事件，以 ':' 开头的是注释（magpie 转发慢模型时
+            // 会先发 ': keepalive' 保活），只有 'data:' 开头的行才是负载。
+            // 旧实现用 split('data:') 切块，把注释行当成「被截断的 JSON 前半截」存进 temp，
+            // 之后每一块都拼在它后面，解析从此永久失败、译文恒为空。
+            const handleLine = (line) => {
+                const text = line.replace(/\r$/, '');
+                if (!text || text.startsWith(':')) return false;
+                if (!text.startsWith('data:')) return false;
+                const payload = text.slice(5).trim();
+                if (!payload || payload === '[DONE]') return false;
+                let result;
+                try {
+                    result = JSON.parse(payload);
+                } catch {
+                    // 单行坏数据直接丢掉，不能污染后续行
+                    return false;
+                }
+                // 结束帧的 choices 是空数组，可选链避免 TypeError
+                const delta = result?.choices?.[0]?.delta?.content;
+                if (!delta) return false;
+                target += delta;
+                if (setResult) {
+                    setResult(target + '_');
+                    return false;
+                }
+                return true;
+            };
             try {
-                let temp = '';
+                // 行缓冲：一个事件可能被拆到两个网络块，最后一段不完整的留到下一块再拼
+                let buffer = '';
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) {
-                        setResult(target.trim());
+                        // 收尾：最后一段可能没有换行结尾，补解析一次再返回，
+                        // 否则丢掉的正是最后一个 token
+                        if (buffer && handleLine(buffer)) return '[STREAM]';
+                        setResult?.(target.trim());
                         return target.trim();
                     }
-                    const str = decoder.decode(value, { stream: true });
-                    let datas = str.split('data:');
-                    for (let data of datas) {
-                        if (data.trim() !== '' && data.trim() !== '[DONE]') {
-                            try {
-                                if (temp !== '') {
-                                    data = temp + data.trim();
-                                    let result = JSON.parse(data.trim());
-                                    if (result.choices[0].delta.content) {
-                                        target += result.choices[0].delta.content;
-                                        if (setResult) {
-                                            setResult(target + '_');
-                                        } else {
-                                            return '[STREAM]';
-                                        }
-                                    }
-                                    temp = '';
-                                } else {
-                                    let result = JSON.parse(data.trim());
-                                    if (result.choices[0].delta.content) {
-                                        target += result.choices[0].delta.content;
-                                        if (setResult) {
-                                            setResult(target + '_');
-                                        } else {
-                                            return '[STREAM]';
-                                        }
-                                    }
-                                }
-                            } catch {
-                                temp = data.trim();
-                            }
-                        }
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() ?? '';
+                    for (const line of lines) {
+                        if (handleLine(line)) return '[STREAM]';
                     }
                 }
             } finally {
