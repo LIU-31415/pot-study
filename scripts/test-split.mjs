@@ -1,66 +1,10 @@
 // 分句逻辑的回归测试。
-// 函数体与 src/window/Translate/components/StudyArea/index.jsx 的 splitSentences
-// 保持一致，改那边时同步改这里。
+// 直接 import 生产函数，不再复制一份实现——之前两处各存一份，
+// 改了生产代码而忘了改测试，就会出现「测试通过但功能是坏的」。
 //
 // 用法：node scripts/test-split.mjs
 
-const ABBREVIATIONS = new Set([
-    'mr', 'mrs', 'ms', 'dr', 'prof', 'sr', 'jr', 'st', 'vs', 'etc', 'fig', 'figs',
-    'eq', 'eqs', 'ref', 'refs', 'al', 'no', 'nos', 'vol', 'pp', 'cf', 'approx',
-    'dept', 'univ', 'inc', 'ltd', 'co', 'corp', 'min', 'max', 'ca', 'resp',
-    'eg', 'ie', 'viz', 'ed', 'eds', 'ch', 'sec', 'tab', 'supp', 'wt',
-]);
-
-function splitSentences(text) {
-    const out = [];
-    if (!text) return out;
-    const paragraphs = text.split(/\r?\n+/).map((s) => s.trim()).filter(Boolean);
-
-    for (const para of paragraphs) {
-        const cjk = (para.match(/[\u4e00-\u9fa5]/g) ?? []).length;
-        const isChinese = cjk > 0 && cjk * 3 >= para.length;
-        if (isChinese) {
-            const raw = para.split(/(?<=[。！？；!?;])/);
-            const parts = [];
-            for (const seg of raw) {
-                let s = seg.trim();
-                if (!s) continue;
-                const cite = s.match(
-                    /^(\d+(?:[-\u2013,]\s?\d+)?|\[\d+(?:[-\u2013,]\s?\d+)*\])\s*(.*)$/s
-                );
-                if (cite && parts.length) {
-                    parts[parts.length - 1] += cite[1];
-                    s = cite[2].trim();
-                    if (!s) continue;
-                }
-                parts.push(s);
-            }
-            out.push(...parts);
-            continue;
-        }
-        const chunks = para.split(
-            /(?<=[。！？])|(?<=[.!?])\s+|(?<=[A-Za-z][.!?]\d+(?:[-\u2013,]\s?\d+)*)\s+|(?<=[A-Za-z][.!?]\[\d+(?:[-\u2013,]\s?\d+)*\])\s+/
-        );
-        let buf = '';
-        for (const chunk of chunks) {
-            buf = buf ? buf + ' ' + chunk : chunk;
-            const m = buf.match(/([A-Za-z][A-Za-z.]*)\.$/);
-            if (m) {
-                const w = m[1].toLowerCase().replace(/\./g, '');
-                if (ABBREVIATIONS.has(w)) continue;
-                if (w.length === 1 && /^[A-Z]$/.test(m[1])) {
-                    if (!/\d\s+[A-Z]\.$/.test(buf)) continue;
-                }
-            }
-            const m2 = buf.match(/([A-Za-z][A-Za-z.]*)\.(\d+(?:[-\u2013,]\s?\d+)*)$/);
-            if (m2 && ABBREVIATIONS.has(m2[1].toLowerCase().replace(/\./g, ''))) continue;
-            if (buf.trim()) out.push(buf.trim());
-            buf = '';
-        }
-        if (buf.trim()) out.push(buf.trim());
-    }
-    return out;
-}
+import { splitSentences } from '../src/utils/sentence.js';
 
 const CASES = [
     {
@@ -84,7 +28,6 @@ const CASES = [
     { name: '单位后的句点要切（0.4 T.）', input: 'The field was 0.4 T. Next we measured.', expect: 2 },
     { name: '中文按全角标点切', input: '这是一个句子。这是第二个句子。这是第三个。', expect: 3 },
     { name: 'en dash 引用范围', input: 'The surface is hydrophobic.36–38 However, aggregation occurs.', expect: 2 },
-    // 以下为贤者指出的边界情况
     {
         name: 'Fig.3 无空格时不能被当成句末引用',
         input: 'Fig.3 shows the result. It is clear.',
@@ -121,6 +64,44 @@ const CASES = [
         expect: 3,
         expectFirst: '样品稳定。',
     },
+
+    // ---- 以下为中文句首数字误判的回归用例 ----
+    {
+        name: '年份不能被当成引用编号',
+        input: '实验结果可靠。2025年再次验证。',
+        expect: 2,
+        expectAll: ['实验结果可靠。', '2025年再次验证。'],
+    },
+    {
+        name: '数量开头的单句不被误切',
+        input: '提高了3.5倍。',
+        expect: 1,
+        expectAll: ['提高了3.5倍。'],
+    },
+    {
+        name: '数量开头且前有句子时保持独立',
+        input: '实验结果可靠。3.5倍的提升仍需验证。',
+        expect: 2,
+        expectAll: ['实验结果可靠。', '3.5倍的提升仍需验证。'],
+    },
+    {
+        name: '纯数字句子不被上一句吞掉',
+        input: '第一段结束。2025。',
+        expect: 2,
+        expectAll: ['第一段结束。', '2025。'],
+    },
+    {
+        name: '数字开头正常句与真实引用编号相邻',
+        input: '结果稳定。36 下一组实验开始。2025年再次验证。',
+        expect: 3,
+        expectAll: ['结果稳定。36', '下一组实验开始。', '2025年再次验证。'],
+    },
+    {
+        name: '中文方括号引用仍并入前句',
+        input: '该结论成立。[12] 后续研究继续。',
+        expect: 2,
+        expectAll: ['该结论成立。[12]', '后续研究继续。'],
+    },
 ];
 
 let failed = 0;
@@ -128,16 +109,21 @@ for (const c of CASES) {
     const got = splitSentences(c.input);
     const okCount = got.length === c.expect;
     const okFirst = !c.expectFirst || got[0] === c.expectFirst;
-    if (okCount && okFirst) {
+    const okAll = !c.expectAll || JSON.stringify(got) === JSON.stringify(c.expectAll);
+    if (okCount && okFirst && okAll) {
         console.log(`  PASS  ${c.name}  (${got.length} 句)`);
     } else {
         failed++;
         console.log(`  FAIL  ${c.name}`);
         console.log(`        期望 ${c.expect} 句，实际 ${got.length} 句`);
         if (!okFirst) console.log(`        首句期望：${c.expectFirst}\n        首句实际：${got[0]}`);
+        if (!okAll) {
+            console.log(`        逐句期望：${JSON.stringify(c.expectAll)}`);
+            console.log(`        逐句实际：${JSON.stringify(got)}`);
+        }
         got.forEach((s, i) => console.log(`        [${i + 1}] ${s}`));
     }
 }
 
-console.log(failed === 0 ? '\n全部通过' : `\n${failed} 项失败`);
+console.log(failed === 0 ? `\n全部通过（${CASES.length} 项）` : `\n${failed} 项失败`);
 process.exitCode = failed === 0 ? 0 : 1;
