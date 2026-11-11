@@ -229,6 +229,8 @@
                 "loading_models": "Loading models...",
                 "model_error": "Failed",
                 "pick_model": "Pick a model",
+    "model_manual": "Model name",
+    "model_manual_hint": "Type it directly if it's not listed, e.g. GLM-5.3-Flash",
                 "model_error_hint": "Failed to load models:",
                 "reasoning": "Thinking effort",
                 "reasoning_default": "Model default",

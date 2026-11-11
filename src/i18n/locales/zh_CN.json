@@ -229,6 +229,8 @@
                 "loading_models": "正在获取模型列表…",
                 "model_error": "获取失败",
                 "pick_model": "选择模型",
+    "model_manual": "模型名",
+    "model_manual_hint": "列表里没有就直接填，例如 GLM-5.3-Flash",
                 "model_error_hint": "模型列表获取失败：",
                 "reasoning": "思考强度",
                 "reasoning_default": "跟随模型默认",

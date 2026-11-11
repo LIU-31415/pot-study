@@ -68,6 +68,8 @@ export default function Study() {
     );
 
     const [models, setModels] = useState([]);
+    // 模型列表请求序号：服务切得快时，先发的慢响应不能覆盖后发的
+    const modelReqRef = useRef(0);
     const [modelLoading, setModelLoading] = useState(false);
     const [modelError, setModelError] = useState('');
 
@@ -132,6 +134,9 @@ export default function Study() {
 
     const loadModels = async (entry) => {
         if (!entry?.url) return;
+        // 每次请求领一个号，回来后只有仍是最新那次才允许写界面，
+        // 否则 A 服务慢、B 服务快时，A 的晚到结果会把 B 的列表冲掉
+        const reqId = ++modelReqRef.current;
         // 刚在「检测并保存」里拿过同一地址的模型列表，直接用，
         // 否则保存后 active 变化会马上再拉一次，白白多一次 GET
         const cached = lastDetectedRef.current;
@@ -151,12 +156,14 @@ export default function Study() {
         setModelError('');
         try {
             const { models: arr } = await fetchModelList(entry.url, entry.apiKey);
+            if (reqId !== modelReqRef.current) return;
             setModels(arr);
         } catch (e) {
+            if (reqId !== modelReqRef.current) return;
             setModels([]);
             setModelError(String(e?.message ?? e));
         } finally {
-            setModelLoading(false);
+            if (reqId === modelReqRef.current) setModelLoading(false);
         }
     };
 
@@ -557,6 +564,17 @@ export default function Study() {
                                     <LuRefreshCw className='text-[16px]' />
                                 </Button>
                             </div>
+
+                            {/* 手填入口：列表拿不到、或想用列表外的模型时直接写模型名 */}
+                            <Input
+                                label={t('config.study.model_manual')}
+                                className='mt-2'
+                                size='sm'
+                                value={active?.model ?? ''}
+                                onValueChange={(v) => pickModel(v)}
+                                placeholder='GLM-5.3-Flash'
+                                description={t('config.study.model_manual_hint')}
+                            />
 
                             {reasoningAvailable && (
                                 <div className='mt-3'>
