@@ -286,9 +286,11 @@ export default function Study() {
         }
 
         const key = createServiceInstanceKey('openai');
+        // 实例名只取模型名的最后一段：agi-tongji-edu/Kimi-K3.1-Pro → Kimi-K3.1-Pro
+        // 服务名（magpie）或完整路径在服务列表里都认不出具体是哪个模型
+        const shortName = String(active.model || '').split('/').pop();
         await store.set(key, {
-            // 实例名用模型名：服务名（如 magpie）在服务列表里认不出具体跑的是哪个模型
-            [INSTANCE_NAME_CONFIG_KEY]: active.model || active.name || 'OpenAI',
+            [INSTANCE_NAME_CONFIG_KEY]: shortName || active.name || 'OpenAI',
             service: 'openai',
             requestPath: active.url,
             model: active.model ?? '',
