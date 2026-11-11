@@ -477,14 +477,12 @@ export default function Study() {
                                 <Input
                                     size='sm'
                                     label={t('config.study.service_name')}
-                                    placeholder={t('config.study.service_name_placeholder')}
                                     value={fName}
                                     onValueChange={setFName}
                                 />
                                 <Input
                                     size='sm'
                                     label={t('config.study.service_url')}
-                                    placeholder={t('config.study.service_url_placeholder')}
                                     value={fUrl}
                                     onValueChange={setFUrl}
                                 />
