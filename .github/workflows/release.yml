@@ -208,11 +208,12 @@ jobs:
                   cat update.json
 
             - name: 发布安装包
-              uses: softprops/action-gh-release@v1
+              uses: softprops/action-gh-release@v2
               with:
                   tag_name: v${{ steps.ver.outputs.version }}
                   name: v${{ steps.ver.outputs.version }}
                   body_path: CHANGELOG
+                  make_latest: true
                   files: |
                       dist/pot-study_*setup.exe
                       dist/pot-study_*.nsis.zip
@@ -220,9 +221,12 @@ jobs:
                       dist/pot-study_*.app.tar.gz
 
             - name: 更新 updater 清单
-              uses: softprops/action-gh-release@v1
+              uses: softprops/action-gh-release@v2
               with:
                   tag_name: updater
                   name: updater
                   body: 'v${{ steps.ver.outputs.version }}'
+                  # 这个 release 只是给自动更新读 update.json 用的，不能抢走 Latest，
+                  # 否则仓库首页显示的“最新版本”会是一个只含 json 的空壳
+                  make_latest: false
                   files: update.json
