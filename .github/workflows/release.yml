@@ -107,7 +107,9 @@ jobs:
                     - target: aarch64-apple-darwin
                       key: darwin-aarch64
                       arch: aarch64
-                      runner: macos-latest
+                      # 用明确的 macos-14 而不是 macos-latest：后者机器池紧张，
+                      # 3.1.1 发版时排队 15 分钟没分到机器被取消，Intel 那条用专用标签反而稳
+                      runner: macos-14
                     - target: x86_64-apple-darwin
                       key: darwin-x86_64
                       arch: x64
