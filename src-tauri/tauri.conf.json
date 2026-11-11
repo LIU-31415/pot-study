@@ -1,6 +1,6 @@
 {
     "build": {
-        "beforeDevCommand": "pnpm dev",
+        "beforeDevCommand": "node node_modules/vite/bin/vite.js",
         "beforeBuildCommand": "pnpm build",
         "devPath": "http://127.0.0.1:1420",
         "distDir": "../dist",
