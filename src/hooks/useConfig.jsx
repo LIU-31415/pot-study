@@ -13,8 +13,19 @@ const DEFAULT_DEBOUNCE = 200;
 const flushRegistry = new Set();
 
 export const flushAllConfigs = async () => {
-    const tasks = Array.from(flushRegistry).map((f) => f());
-    await Promise.allSettled(tasks);
+    const tasks = Array.from(flushRegistry).map((f) => {
+        try {
+            return f();
+        } catch {
+            return Promise.resolve();
+        }
+    });
+    // 关窗口前调用，不能无限等：某个窗口的 store 已失效时 invoke 可能不回来，
+    // 卡住就等于关不掉窗口
+    await Promise.race([
+        Promise.allSettled(tasks),
+        new Promise((resolve) => setTimeout(resolve, 300)),
+    ]);
 };
 
 export const useConfig = (key, defaultValue, options = {}) => {

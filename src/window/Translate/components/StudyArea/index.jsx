@@ -136,6 +136,8 @@ export default function StudyArea() {
         : null;
     // 各服务的模型列表（异步拉，失败就只用默认模型）
     const [serviceModels, setServiceModels] = useState({});
+    // 服务集合的指纹：增删服务时用它当依赖，数组引用每次 render 都变
+    const serviceKey = studyList.map((s) => `${s.id}|${s.url ?? ''}`).join(',');
 
     const [pairs, setPairs] = useState([]);
     const [isLoading, setIsLoading] = useState(false);

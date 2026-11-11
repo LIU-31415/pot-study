@@ -79,7 +79,16 @@ fn build_window(label: &str, title: &str) -> (Window, bool) {
             // 否则用户点“设置”后只能看到任务栏图标，还得再点一下才出来
             let _ = v.unminimize();
             let _ = v.show();
-            v.set_focus().unwrap();
+            // Windows 的前台锁定会让 set_focus 返回成功但窗口仍在后面，
+            // 表现就是“窗口明明开着却看不见”。置顶再取消能可靠地提到最前。
+            // translate 窗口跳过：它的置顶状态由学习模式钉住和用户配置控制，
+            // 在这里改会把它重置掉
+            if label != "translate" {
+                let _ = v.set_always_on_top(true);
+                let _ = v.set_always_on_top(false);
+            }
+            // 不用 unwrap：焦点抢不到不应该 panic 掉整个命令
+            let _ = v.set_focus();
             (v, true)
         }
         None => {
