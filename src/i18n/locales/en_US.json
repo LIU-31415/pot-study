@@ -517,6 +517,7 @@
             "study_export_prefix": "Translation",
             "study_export_prefix_both": "Source-Target",
             "study_copy_both": "Both",
+    "study_retranslate_new": "Switched to {{name}}, click to retranslate",
             "study_copy_target": "Target",
             "expand_source": "Expand source",
             "collapse_source": "Collapse source"

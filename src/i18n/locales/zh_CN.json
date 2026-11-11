@@ -517,6 +517,7 @@
             "study_export_prefix": "译文",
             "study_export_prefix_both": "原文译文",
             "study_copy_both": "原文+译文",
+    "study_retranslate_new": "已换到 {{name}}，点击重译",
             "study_copy_target": "仅译文",
             "expand_source": "展开原文",
             "collapse_source": "收起原文"

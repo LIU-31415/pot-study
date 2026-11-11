@@ -9,6 +9,7 @@ import {
     DropdownTrigger,
     DropdownMenu,
     DropdownItem,
+    DropdownSection,
 } from '@nextui-org/react';
 import { useAtomValue } from 'jotai';
 import React, { useEffect, useState, useRef } from 'react';
@@ -22,7 +23,7 @@ import * as builtinServices from '../../../../services/translate';
 import { useConfig } from '../../../../hooks';
 import { sourceTextAtom, detectLanguageAtom } from '../SourceArea';
 import { sourceLanguageAtom, targetLanguageAtom } from '../LanguageArea';
-import { resolveActiveStudyService } from '../../../../utils/study_service';
+import { resolveActiveStudyService, fetchModelList } from '../../../../utils/study_service';
 
 // 常见缩写：句号后不当作句子边界
 const ABBREVIATIONS = new Set([
@@ -31,6 +32,12 @@ const ABBREVIATIONS = new Set([
     'dept', 'univ', 'inc', 'ltd', 'co', 'corp', 'min', 'max', 'ca', 'resp',
     'eg', 'ie', 'viz', 'ed', 'eds', 'ch', 'sec', 'tab', 'supp', 'wt',
 ]);
+
+// 模型 ID 去掉供应商前缀：agi-tongji-edu/GLM-5.3-Flash → GLM-5.3-Flash
+// 和「导出到翻译服务」用的是同一套规则，两处显示保持一致
+export function shortModel(m) {
+    return String(m ?? '').split('/').pop() || '';
+}
 
 export function splitSentences(text) {
     const out = [];
@@ -117,8 +124,18 @@ export default function StudyArea() {
 
     // 学习模式的服务独立配置（OpenAI 兼容格式），不再复用翻译服务列表
     const studyList = studyServices ?? [];
-    const active = resolveActiveStudyService(studyList, studyServiceId);
-    const name = active?.id ?? '';
+    // 按服务记住上次选的模型：同一个网关里有多个模型时，窗口内就能切
+    // 不回写服务条目，设置页里那条配置不受影响
+    const [studyModelMap, setStudyModelMap] = useConfig('study_model_map', {});
+    const modelMap = studyModelMap ?? {};
+    const baseActive = resolveActiveStudyService(studyList, studyServiceId);
+    const name = baseActive?.id ?? '';
+    // 覆盖模型后的生效配置：后面所有请求都读这个
+    const active = baseActive
+        ? { ...baseActive, model: modelMap[baseActive.id] || baseActive.model }
+        : null;
+    // 各服务的模型列表（异步拉，失败就只用默认模型）
+    const [serviceModels, setServiceModels] = useState({});
 
     const [pairs, setPairs] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -138,10 +155,44 @@ export default function StudyArea() {
     const runId = useRef(0);
     const lastRenderRef = useRef(0);
 
+    // 翻译请求里读 ref 而不是闭包：换了模型/服务不自动重译，
+    // 但下一次真正发请求时必须用最新的那个
+    const activeRef = useRef(null);
+    activeRef.current = active;
+    // 上次实际用哪个模型翻的：换模型后重译按钮变色提示
+    const [translatedModel, setTranslatedModel] = useState('');
+
+    // 后台拉各服务的模型列表，供下拉分组用。失败就退回只显示默认模型
+    const serviceKey = studyList.map((s) => `${s.id}|${s.url ?? ''}`).join(',');
+    useEffect(() => {
+        if (!studyList.length) return;
+        let cancelled = false;
+        (async () => {
+            const entries = await Promise.all(
+                studyList.map(async (s) => {
+                    if (!s.url) return [s.id, []];
+                    try {
+                        const { models } = await fetchModelList(s.url, s.apiKey);
+                        return [s.id, models];
+                    } catch {
+                        return [s.id, []];
+                    }
+                })
+            );
+            if (!cancelled) setServiceModels(Object.fromEntries(entries));
+        })();
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [serviceKey]);
+
     const runTranslate = async (sentences) => {
         const id = ++runId.current;
         setError('');
         setIsLoading(true);
+        // 记下这次用的模型，换模型后按钮才知道该不该变色
+        setTranslatedModel(activeRef.current?.model ?? '');
 
         const total = sentences.length;
         const batches = [];
@@ -182,9 +233,9 @@ export default function StudyArea() {
                 const numbered = items.map((s, i) => `${i + 1}. ${s}`).join('\n');
                 const cfg = {
                     service: 'openai',
-                    requestPath: active?.url ?? '',
-                    apiKey: active?.apiKey ?? '',
-                    model: active?.model ?? '',
+                    requestPath: activeRef.current?.url ?? '',
+                    apiKey: activeRef.current?.apiKey ?? '',
+                    model: activeRef.current?.model ?? '',
                     stream: true,
                     promptList: [
                         { role: 'system', content: STUDY_SYSTEM },
@@ -283,13 +334,19 @@ export default function StudyArea() {
         return () => {
             runId.current++;
         };
-        // 依赖里不放 detectLanguage：SourceArea 是「先检测、再同步 atom」的顺序，
-        // 这里收到新文本时检测结果已经就绪。加进依赖会让同一次划词翻两遍。
+        // 依赖里不放 name / active?.model：换服务或换模型不自动重译，
+        // 只把重译按钮变色提醒，避免用户没注意时白花 token
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sourceText, sourceLanguage, targetLanguage, name, active?.model]);
+    }, [sourceText, sourceLanguage, targetLanguage]);
 
     const serviceLabel = active?.name || '-';
     const modelLabel = active?.model || '';
+    // 有得选才做下拉：多个服务，或者某个服务下不止一个模型
+    const hasChoice =
+        studyList.length > 1 ||
+        studyList.some((s) => (serviceModels[s.id]?.length ?? 0) > 1);
+    // 当前选的模型和上次实际翻的不是同一个：提示重译，但不自动发请求
+    const modelChanged = pairs.length > 0 && !!modelLabel && modelLabel !== translatedModel;
 
     // 导出：选中了就只导选中的，没选就导全部
     const buildMarkdown = (items) => {
@@ -353,7 +410,7 @@ export default function StudyArea() {
         <Card shadow='none' className='bg-content1 rounded-[14px]'>
             <CardHeader className='flex justify-between pl-0 pr-2 pt-2.5 pb-1 bg-content1 rounded-t-[14px]'>
                 <div className='flex items-center gap-2 pl-2 text-[13px] text-default-500 min-w-0'>
-                    {studyList.length > 1 ? (
+                    {hasChoice ? (
                         <Dropdown>
                             <DropdownTrigger>
                                 <Button
@@ -362,24 +419,46 @@ export default function StudyArea() {
                                     className='h-[24px] min-w-0 px-1 text-[13px] text-default-500 rounded-full'
                                     endContent={<LuChevronDown className='text-[13px]' />}
                                 >
-                                    {modelLabel || serviceLabel}
+                                    {shortModel(modelLabel) || serviceLabel}
                                 </Button>
                             </DropdownTrigger>
                             <DropdownMenu
                                 aria-label='study service'
                                 selectionMode='single'
-                                selectedKeys={[name]}
+                                selectedKeys={[`${name}::${modelLabel}`]}
+                                className='max-h-[320px] overflow-y-auto'
                                 onAction={(k) => {
-                                    setStudyServiceId(String(k));
+                                    const key = String(k);
+                                    const sep = key.indexOf('::');
+                                    const sid = key.slice(0, sep);
+                                    const m = key.slice(sep + 2);
+                                    if (sid !== name) setStudyServiceId(sid);
+                                    setStudyModelMap({ ...modelMap, [sid]: m });
                                 }}
                             >
-                                {studyList.map((s) => (
-                                    <DropdownItem key={s.id}>{s.name || s.id}</DropdownItem>
-                                ))}
+                                {studyList.map((s) => {
+                                    // 拉不到列表时至少把默认模型列出来，不然这一组是空的
+                                    const list = serviceModels[s.id]?.length
+                                        ? serviceModels[s.id]
+                                        : [s.model].filter(Boolean);
+                                    return (
+                                        <DropdownSection
+                                            key={s.id}
+                                            title={s.name || s.id}
+                                            showDivider
+                                        >
+                                            {list.map((m) => (
+                                                <DropdownItem key={`${s.id}::${m}`}>
+                                                    {shortModel(m)}
+                                                </DropdownItem>
+                                            ))}
+                                        </DropdownSection>
+                                    );
+                                })}
                             </DropdownMenu>
                         </Dropdown>
                     ) : (
-                        <span className='truncate'>{modelLabel || serviceLabel}</span>
+                        <span className='truncate'>{shortModel(modelLabel) || serviceLabel}</span>
                     )}
                     <span className='text-default-300'>·</span>
                     <span>{t('translate.study_sentences', { n: pairs.length })}</span>
@@ -455,10 +534,19 @@ export default function StudyArea() {
                             <LuDownload className='text-[15px]' />
                         </Button>
                     </Tooltip>
-                    <Tooltip content={t('translate.translate')}>
+                    <Tooltip
+                        content={
+                            modelChanged
+                                ? t('translate.study_retranslate_new', {
+                                      name: shortModel(modelLabel),
+                                  })
+                                : t('translate.translate')
+                        }
+                    >
                         <Button
                             isIconOnly
-                            variant='light'
+                            variant={modelChanged ? 'flat' : 'light'}
+                            color={modelChanged ? 'primary' : 'default'}
                             size='sm'
                             className='rounded-full'
                             onPress={() => {
