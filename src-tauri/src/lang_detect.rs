@@ -44,8 +44,6 @@ fn detect_lang(text: &str) -> String {
         Language::German => "de",
         Language::Spanish => "es",
         Language::Russian => "ru",
-        // 检测器只装了上面 8 种，其余情况（理论上不会出现）归到英语
-        _ => "en",
     };
     code.to_string()
 }

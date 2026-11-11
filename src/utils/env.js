@@ -7,8 +7,15 @@ export let osVersion = '';
 export let appVersion = '';
 
 export async function initEnv() {
-    osType = await type();
-    arch = await archFn();
-    osVersion = await version();
-    appVersion = await getVersion();
+    // 四个查询互不依赖，并行取：原来串行 await 等于把四次 IPC 排队
+    const [t, a, v, av] = await Promise.all([
+        type(),
+        archFn(),
+        version(),
+        getVersion(),
+    ]);
+    osType = t;
+    arch = a;
+    osVersion = v;
+    appVersion = av;
 }

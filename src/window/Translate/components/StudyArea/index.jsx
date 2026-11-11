@@ -283,8 +283,10 @@ export default function StudyArea() {
         return () => {
             runId.current++;
         };
+        // 依赖里不放 detectLanguage：SourceArea 是「先检测、再同步 atom」的顺序，
+        // 这里收到新文本时检测结果已经就绪。加进依赖会让同一次划词翻两遍。
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sourceText, sourceLanguage, targetLanguage, name, active?.model, detectLanguage]);
+    }, [sourceText, sourceLanguage, targetLanguage, name, active?.model]);
 
     const serviceLabel = active?.name || '-';
     const modelLabel = active?.model || '';

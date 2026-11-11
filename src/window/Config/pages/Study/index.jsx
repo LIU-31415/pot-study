@@ -88,6 +88,11 @@ export default function Study() {
     const [localChecking, setLocalChecking] = useState(false);
     // 探测是异步的，回调里要读最新的服务列表，不能用闭包里的旧值
     const servicesRef = useRef([]);
+    // 导出 in-flight 标记，防连点
+    const exportingRef = useRef(false);
+    // 刚检测到的模型列表：保存后 active 变化会触发自动加载，
+    // 没有这个缓存就会把同一次检测的 GET 再发一遍
+    const lastDetectedRef = useRef(null);
 
     const services = studyServices ?? [];
     const active = resolveActiveStudyService(services, studyServiceId);
@@ -123,6 +128,21 @@ export default function Study() {
 
     const loadModels = async (entry) => {
         if (!entry?.url) return;
+        // 刚在「检测并保存」里拿过同一地址的模型列表，直接用，
+        // 否则保存后 active 变化会马上再拉一次，白白多一次 GET
+        const cached = lastDetectedRef.current;
+        if (
+            cached &&
+            cached.url === entry.url &&
+            cached.apiKey === (entry.apiKey ?? '') &&
+            Date.now() - cached.ts < 30000
+        ) {
+            lastDetectedRef.current = null; // 用一次就作废，避免后续误用
+            setModels(cached.models);
+            setModelError('');
+            setModelLoading(false);
+            return;
+        }
         setModelLoading(true);
         setModelError('');
         try {
@@ -225,7 +245,15 @@ export default function Study() {
         try {
             const { models: arr, url: usedUrl } = await fetchModelList(url, fKey);
             if (arr.length === 0) throw new Error('empty model list');
-            saveEntry(toChatCompletionsUrl(usedUrl), fKey, arr);
+            const finalUrl = toChatCompletionsUrl(usedUrl);
+            // 把刚拿到的列表留给 loadModels，避免保存后又拉一遍
+            lastDetectedRef.current = {
+                url: finalUrl,
+                apiKey: fKey,
+                models: arr,
+                ts: Date.now(),
+            };
+            saveEntry(finalUrl, fKey, arr);
         } catch (e) {
             setFStatus({
                 ok: false,
@@ -265,24 +293,41 @@ export default function Study() {
 
     // 把当前学习服务写成一条翻译服务实例（单向：只往翻译服务写，不回头改学习模式）
     const exportToService = async () => {
+        // 连点会重复执行完整查重与写入，用 in-flight 标记挡住
+        if (exportingRef.current) return;
+        exportingRef.current = true;
+        try {
+            await doExport();
+        } finally {
+            exportingRef.current = false;
+        }
+    };
+
+    const doExport = async () => {
         if (!active?.url) {
             toast(t('config.study.export_no_url'), { duration: 3000, style: toastStyle });
             return;
         }
         const list = translateServiceList ?? [];
 
-        // 地址和模型都相同就不重复创建，避免点几次攒出一堆重复实例
-        for (const k of list) {
-            const cfg = (await store.get(k)) ?? {};
-            if (cfg.requestPath === active.url && (cfg.model ?? '') === (active.model ?? '')) {
-                toast(
-                    t('config.study.export_exists', {
-                        name: cfg[INSTANCE_NAME_CONFIG_KEY] || k,
-                    }),
-                    { duration: 4000, style: toastStyle }
-                );
-                return;
-            }
+        // 地址和模型都相同就不重复创建，避免点几次攒出一堆重复实例。
+        // 并行读：实例多时串行 await 会把按钮的响应拖成上百毫秒
+        const cfgs = await Promise.all(
+            list.map(async (k) => [k, (await store.get(k)) ?? {}])
+        );
+        const dup = cfgs.find(
+            ([, cfg]) =>
+                cfg.requestPath === active.url && (cfg.model ?? '') === (active.model ?? '')
+        );
+        if (dup) {
+            const [dupKey, dupCfg] = dup;
+            toast(
+                t('config.study.export_exists', {
+                    name: dupCfg[INSTANCE_NAME_CONFIG_KEY] || dupKey,
+                }),
+                { duration: 4000, style: toastStyle }
+            );
+            return;
         }
 
         const key = createServiceInstanceKey('openai');
@@ -301,8 +346,8 @@ export default function Study() {
         });
         await store.save();
 
-        // 列表为空时它就是唯一可用的服务；否则追加到末尾，
-        // 不动用户当前在用的那个（翻译服务列表第一项才是激活项）
+        // 列表为空时它就是唯一可用的服务；否则追加到末尾，不改变列表顺序。
+        // 注意：翻译窗口会渲染列表里所有启用的服务，不是只跑第一项。
         setTranslateServiceList(list.length === 0 ? [key] : [...list, key]);
         toast(t('config.study.export_done', { name: active.name }), {
             duration: 4000,
