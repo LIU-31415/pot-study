@@ -297,12 +297,13 @@ export default function SourceArea(props) {
     }, [sourceText, sourceIsExpanded, appFontSize]);
 
     const detect_language = async (text) => {
-        // 检测失败（断网、接口不可用）不能挡住翻译：
-        // 之前这里 reject 会让外层 .then 不执行，译文永远不更新，也看不出为什么
         try {
-            setDetectLanguage(await detect(text));
+            const v = await detect(text);
+            // detect 返回 null = 所有引擎都失败。标成 'failed' 而不是留空：
+            // 留空会让学习模式一直等检测结果，永远不翻译
+            setDetectLanguage(v || 'failed');
         } catch {
-            // 保留上一次的检测结果，继续走翻译
+            setDetectLanguage('failed');
         }
     };
 
@@ -518,7 +519,7 @@ export default function SourceArea(props) {
                                 </Tooltip>
                             )}
                         </div>
-                        {detectLanguage !== '' && (
+                        {detectLanguage !== '' && detectLanguage !== 'failed' && (
                             <Chip
                                 size='sm'
                                 color='secondary'

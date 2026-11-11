@@ -310,25 +310,60 @@ async function local_detect(text) {
     return await invoke('lang_detect', { text: text });
 }
 
-export default async function detect(text) {
-    let langDetectEngine = (await store.get('translate_detect_engine')) ?? 'baidu';
+// 网络检测的超时：百度国内正常 200–400ms，1.5s 是 3 倍余量，
+// 再长用户已经觉得卡了，再短容易误杀慢网络下的正常请求
+const DETECT_TIMEOUT = 1500;
 
-    switch (langDetectEngine) {
+function withTimeout(promise, ms) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('detect timeout')), ms);
+        }),
+    ]);
+}
+
+function runEngine(engine, text) {
+    switch (engine) {
         case 'baidu':
-            return await baidu_detect(text);
+            return baidu_detect(text);
         case 'google':
-            return await google_detect(text);
-        case 'local':
-            return await local_detect(text);
+            return google_detect(text);
         case 'tencent':
-            return await tencent_detect(text);
+            return tencent_detect(text);
         case 'niutrans':
-            return await niutrans_detect(text);
+            return niutrans_detect(text);
         case 'yandex':
-            return await yandex_detect(text);
+            return yandex_detect(text);
         case 'bing':
-            return await bing_detect(text);
+            return bing_detect(text);
         default:
+            return local_detect(text);
+    }
+}
+
+// 返回语言代码；检测全部失败时返回 null，由调用方兜底
+// （不能一直 reject，否则学习模式会卡在等检测上不翻译）
+export default async function detect(text) {
+    const engine = (await store.get('translate_detect_engine')) ?? 'baidu';
+
+    // 用户主动选了本地检测，就不要再套超时和降级
+    if (engine === 'local') {
+        try {
             return await local_detect(text);
+        } catch {
+            return null;
+        }
+    }
+
+    try {
+        return await withTimeout(runEngine(engine, text), DETECT_TIMEOUT);
+    } catch {
+        // 网络引擎超时或报错：降级到本地检测（不走网络，最可靠）
+        try {
+            return await local_detect(text);
+        } catch {
+            return null;
+        }
     }
 }

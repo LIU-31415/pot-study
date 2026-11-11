@@ -8,29 +8,18 @@ static DETECTOR: OnceCell<LanguageDetector> = OnceCell::new();
 
 fn detector() -> &'static LanguageDetector {
     DETECTOR.get_or_init(|| {
+        // 只保留 8 种常用语言。lingua 的语言模型是逐种加载的，
+        // 22 种全量会多占一大块常驻内存；这 8 种覆盖日常翻译场景，
+        // 小语种本来就该用在线检测（百度/谷歌）而不是本地。
         let languages = vec![
             Language::Chinese,
             Language::Japanese,
             Language::English,
             Language::Korean,
             Language::French,
-            Language::Spanish,
             Language::German,
+            Language::Spanish,
             Language::Russian,
-            Language::Italian,
-            Language::Portuguese,
-            Language::Turkish,
-            Language::Arabic,
-            Language::Vietnamese,
-            Language::Thai,
-            Language::Indonesian,
-            Language::Malay,
-            Language::Hindi,
-            Language::Mongolian,
-            Language::Bokmal,
-            Language::Nynorsk,
-            Language::Persian,
-            Language::Ukrainian,
         ];
         LanguageDetectorBuilder::from_languages(&languages).build()
     })
@@ -52,23 +41,11 @@ fn detect_lang(text: &str) -> String {
         Language::English => "en",
         Language::Korean => "ko",
         Language::French => "fr",
-        Language::Spanish => "es",
         Language::German => "de",
+        Language::Spanish => "es",
         Language::Russian => "ru",
-        Language::Italian => "it",
-        Language::Portuguese => "pt_pt",
-        Language::Turkish => "tr",
-        Language::Arabic => "ar",
-        Language::Vietnamese => "vi",
-        Language::Thai => "th",
-        Language::Indonesian => "id",
-        Language::Malay => "ms",
-        Language::Hindi => "hi",
-        Language::Mongolian => "mn_cy",
-        Language::Bokmal => "nb_no",
-        Language::Nynorsk => "nn_no",
-        Language::Persian => "fa",
-        Language::Ukrainian => "uk",
+        // 检测器只装了上面 8 种，其余情况（理论上不会出现）归到英语
+        _ => "en",
     };
     code.to_string()
 }

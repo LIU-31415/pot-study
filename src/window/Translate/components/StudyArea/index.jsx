@@ -165,11 +165,13 @@ export default function StudyArea() {
                 const LanguageEnum = builtinServices['openai'].Language;
 
                 let to = targetLanguage;
-                // 检测结果与目标语言相同（或还没检测出来）时改用第二语言，
+                // 检测结果与目标语言相同、检测失败、或还没检测出来，都改用第二语言：
                 // 否则中文输入会“翻译”成中文，看上去像没翻译
                 if (
                     sourceLanguage === 'auto' &&
-                    (!detectLanguage || targetLanguage === detectLanguage)
+                    (!detectLanguage ||
+                        detectLanguage === 'failed' ||
+                        targetLanguage === detectLanguage)
                 ) {
                     to = secondLanguage;
                 }
