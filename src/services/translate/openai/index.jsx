@@ -71,6 +71,8 @@ export async function translate(text, from, to, options) {
         });
         if (res.ok) {
             let target = '';
+            // 输出被长度限制截断时置位，收尾时要报错而不是当成功返回
+            let truncated = false;
             const reader = res.body.getReader();
             // 必须复用同一个 TextDecoder 并开 stream 模式：
             // 每个网络块单独解码时，中文字符被拆到两个块会变成乱码
@@ -92,8 +94,18 @@ export async function translate(text, from, to, options) {
                     // 单行坏数据直接丢掉，不能污染后续行
                     return false;
                 }
+                // 流内错误：网关在上游失败时会回一个 error 对象，HTTP 状态仍是 200。
+                // 旧实现把它当“没有 delta”默默跳过，调用方会拿到空译文却以为成功。
+                if (result?.error) {
+                    const e = result.error;
+                    const msg = e.message || e.code || JSON.stringify(e);
+                    throw new Error(`stream error: ${msg}`);
+                }
+                const choice = result?.choices?.[0];
+                // 达到输出上限被截断，内容不完整，不能当成功
+                if (choice?.finish_reason === 'length') truncated = true;
                 // 结束帧的 choices 是空数组，可选链避免 TypeError
-                const delta = result?.choices?.[0]?.delta?.content;
+                const delta = choice?.delta?.content;
                 if (!delta) return false;
                 target += delta;
                 if (setResult) {
@@ -111,6 +123,10 @@ export async function translate(text, from, to, options) {
                         // 收尾：最后一段可能没有换行结尾，补解析一次再返回，
                         // 否则丢掉的正是最后一个 token
                         if (buffer && handleLine(buffer)) return '[STREAM]';
+                        // 被截断的结果不能交给调用方当成功
+                        if (truncated) {
+                            throw new Error('stream truncated: finish_reason=length');
+                        }
                         setResult?.(target.trim());
                         return target.trim();
                     }
