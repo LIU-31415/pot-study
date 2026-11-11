@@ -1,14 +1,15 @@
 {
+    "build": {
+        "beforeBuildCommand": "npm run build"
+    },
     "package": {
-        "productName": "Pot 学习版",
+        "productName": "Pot Study",
         "version": "3.0.7-lzc.1"
     },
     "tauri": {
         "bundle": {
-            "identifier": "com.lzc.pot-study"
-        },
-        "updater": {
-            "active": false
+            "identifier": "com.lzc.pot-study",
+            "targets": ["nsis"]
         }
     }
 }

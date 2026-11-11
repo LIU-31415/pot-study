@@ -19,7 +19,7 @@
 
 ## 下载
 
-从 [Releases](https://github.com/你的用户名/pot-study/releases) 获取安装包。
+从 [Releases](https://github.com/LIU-31415/pot-study/releases) 获取安装包。
 
 > 本版本与原版 Pot 使用不同的配置目录，两者可以同时安装，互不影响。
 
