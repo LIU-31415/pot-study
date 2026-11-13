@@ -5,15 +5,13 @@ import {
     Button,
     Tooltip,
     Spinner,
-    Dropdown,
-    DropdownTrigger,
-    DropdownMenu,
-    DropdownItem,
-    DropdownSection,
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
 } from '@nextui-org/react';
 import { useAtomValue } from 'jotai';
 import React, { useEffect, useState, useRef } from 'react';
-import { LuRefreshCw, LuChevronDown, LuCopy, LuDownload, LuCheck } from 'react-icons/lu';
+import { LuRefreshCw, LuChevronDown, LuCopy, LuDownload, LuCheck, LuStar } from 'react-icons/lu';
 import { invoke } from '@tauri-apps/api/tauri';
 import { save } from '@tauri-apps/api/dialog';
 import { writeText } from '@tauri-apps/api/clipboard';
@@ -30,9 +28,12 @@ import { defaultRequestArguments } from '../../../../services/translate/openai/C
 // 模型 ID 去掉供应商前缀：agi-tongji-edu/GLM-5.3-Flash → GLM-5.3-Flash
 // 和「导出到翻译服务」用的是同一套规则，两处显示保持一致
 export function shortModel(m) {
-    return String(m ?? '').split('/').pop() || '';
+    return (
+        String(m ?? '')
+            .split('/')
+            .pop() || ''
+    );
 }
-
 
 function parseNumbered(raw) {
     const map = new Map();
@@ -55,8 +56,7 @@ const STUDY_SYSTEM =
     'Never merge or split sentences. Do not add explanations, notes, or extra text.';
 
 const STUDY_USER =
-    'Translate the following numbered sentences into $to.\n' +
-    'Keep the numbering. One line per sentence.\n\n$text';
+    'Translate the following numbered sentences into $to.\n' + 'Keep the numbering. One line per sentence.\n\n$text';
 
 const BATCH_SIZE = 20;
 const MAX_SINGLE = 30;
@@ -84,6 +84,8 @@ export default function StudyArea() {
     const [secondLanguage] = useConfig('translate_second_language', 'en');
     const [studyServices, setStudyServices] = useConfig('study_services', []);
     const [studyServiceId, setStudyServiceId] = useConfig('study_service_id', '');
+    // 常用预设：和设置页共用同一份 { sid, model }，两边看到的常用模型一致
+    const [pinnedModels, setPinnedModels] = useConfig('study_pinned_models', []);
     // 复制/导出的内容形态：both = 原文+译文，target = 仅译文
     const [copyMode, setCopyMode] = useConfig('study_copy_mode', 'both');
     // 同 selected/pairs：onPress 可能拿到旧闭包，导出前从 ref 读当前值
@@ -134,9 +136,7 @@ export default function StudyArea() {
     const baseActive = resolveActiveStudyService(studyList, studyServiceId);
     const name = baseActive?.id ?? '';
     // 生效配置：迁移后 map 为空，这里只作兜底，防止迁移写盘失败时丢模型
-    const active = baseActive
-        ? { ...baseActive, model: modelMap[baseActive.id] || baseActive.model }
-        : null;
+    const active = baseActive ? { ...baseActive, model: modelMap[baseActive.id] || baseActive.model } : null;
     // 各服务的模型列表（异步拉，失败就只用默认模型）
     const [serviceModels, setServiceModels] = useState({});
     // 服务集合的指纹：增删服务时用它当依赖，数组引用每次 render 都变
@@ -243,10 +243,7 @@ export default function StudyArea() {
     // 否则中文输入会「翻译」成中文。缓存键必须用这个值，
     // 否则改了第二语言还会命中旧语言的译文。
     const computeTarget = (srcLang, tgtLang, detected) => {
-        if (
-            srcLang === 'auto' &&
-            (!detected || detected === 'failed' || tgtLang === detected)
-        ) {
+        if (srcLang === 'auto' && (!detected || detected === 'failed' || tgtLang === detected)) {
             return secondLanguage;
         }
         return tgtLang;
@@ -264,11 +261,7 @@ export default function StudyArea() {
             model: act?.model,
             reasoningEffort: act?.reasoningEffort,
         };
-        const effectiveTarget = computeTarget(
-            sourceLanguage,
-            targetLanguage,
-            detectLanguage
-        );
+        const effectiveTarget = computeTarget(sourceLanguage, targetLanguage, detectLanguage);
         const cacheKey = makeCacheKey(act, sourceText, sourceLanguage, effectiveTarget);
         const cached = touchCache(cacheKey);
         if (cached) {
@@ -298,9 +291,7 @@ export default function StudyArea() {
                 batches.push({ start: i, count: Math.min(BATCH_SIZE, total - i) });
             }
         }
-        setBatchInfo(
-            batches.length > 1 ? t('translate.study_batches', { n: batches.length }) : ''
-        );
+        setBatchInfo(batches.length > 1 ? t('translate.study_batches', { n: batches.length }) : '');
 
         const acc = sentences.map((s) => ({ src: s, dst: '', error: '' }));
         setPairs(acc.map((p) => ({ ...p })));
@@ -321,39 +312,32 @@ export default function StudyArea() {
                     apiKey: snapshot.apiKey ?? '',
                     model: snapshot.model ?? '',
                     stream: true,
-                    requestArguments: JSON.stringify(
-                        buildRequestArguments(snapshot.url, snapshot.reasoningEffort)
-                    ),
+                    requestArguments: JSON.stringify(buildRequestArguments(snapshot.url, snapshot.reasoningEffort)),
                     promptList: [
                         { role: 'system', content: STUDY_SYSTEM },
                         { role: 'user', content: STUDY_USER },
                     ],
                 };
 
-                await builtinServices['openai'].translate(
-                    numbered,
-                    LanguageEnum[sourceLanguage],
-                    LanguageEnum[to],
-                    {
-                        config: cfg,
-                        detect: detectLanguage,
-                        signal: controller.signal,
-                        setResult: (v) => {
-                            if (runId.current !== id) return;
-                            const map = parseNumbered(v);
-                            items.forEach((s, i) => {
-                                const gi = batch.start + i;
-                                acc[gi].dst = map.get(i + 1) || '';
-                                acc[gi].error = '';
-                            });
-                            // 节流：流式碎片来得很快，每 120ms 最多重渲一次
-                            const now = Date.now();
-                            if (now - lastRenderRef.current < 120) return;
-                            lastRenderRef.current = now;
-                            setPairs(acc.map((p) => ({ ...p })));
-                        },
-                    }
-                );
+                await builtinServices['openai'].translate(numbered, LanguageEnum[sourceLanguage], LanguageEnum[to], {
+                    config: cfg,
+                    detect: detectLanguage,
+                    signal: controller.signal,
+                    setResult: (v) => {
+                        if (runId.current !== id) return;
+                        const map = parseNumbered(v);
+                        items.forEach((s, i) => {
+                            const gi = batch.start + i;
+                            acc[gi].dst = map.get(i + 1) || '';
+                            acc[gi].error = '';
+                        });
+                        // 节流：流式碎片来得很快，每 120ms 最多重渲一次
+                        const now = Date.now();
+                        if (now - lastRenderRef.current < 120) return;
+                        lastRenderRef.current = now;
+                        setPairs(acc.map((p) => ({ ...p })));
+                    },
+                });
                 // 本批结束：没拿到译文的句子按失败处理。
                 // 上游用流内 error 事件或截断收尾时，解析会得到空译文且不报错，
                 // 不拦的话空白结果会被当成成功写进缓存，重译也命中它。
@@ -397,7 +381,10 @@ export default function StudyArea() {
             // 失败结果入缓存会导致恢复网络后重译直接命中，永远修不好
             if (runId.current === id) {
                 if (!acc.some((p) => p.error)) {
-                    writeCache(cacheKey, acc.map((p) => ({ ...p })));
+                    writeCache(
+                        cacheKey,
+                        acc.map((p) => ({ ...p }))
+                    );
                 }
                 // 翻译途中换了模型或思考强度：这轮结果是旧配置跑的，
                 // 不能把「当前配置还没应用」的提示清掉，否则用户会以为新设置已经生效
@@ -471,7 +458,6 @@ export default function StudyArea() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [serviceKey]);
 
-
     useEffect(() => {
         if (!sourceText || !sourceText.trim()) {
             // 让在途请求失效，避免旧译文被写回
@@ -510,10 +496,33 @@ export default function StudyArea() {
 
     const serviceLabel = active?.name || '-';
     const modelLabel = active?.model || '';
+
+    // 选中某个服务下的模型：服务和模型各只有一份配置，设置页会同步看到
+    const pickModelOf = (sid, m) => {
+        if (sid !== name) setStudyServiceId(sid);
+        setStudyServices(studyList.map((s) => (s.id === sid ? { ...s, model: m } : s)));
+        setMenuOpen(false);
+    };
+
+    // 星标：收藏的模型排到所在服务的组内前面
+    const toggleStar = (sid, m) => {
+        const list = pinnedModels ?? [];
+        const exists = list.some((p) => p.sid === sid && p.model === m);
+        setPinnedModels(exists ? list.filter((p) => !(p.sid === sid && p.model === m)) : [...list, { sid, model: m }]);
+    };
+    const isPinned = (sid, m) => (pinnedModels ?? []).some((p) => p.sid === sid && p.model === m);
+
+    // 常用区：跨服务置顶，顺序就是收藏先后；服务已删的项直接跳过
+    const pinnedList = (pinnedModels ?? []).filter((p) => studyList.some((s) => s.id === p.sid));
+    // 服务分组里不再重复列已进常用的模型，全被收藏了就整组不显示
+    const modelGroups = studyList
+        .map((s) => {
+            const full = serviceModels[s.id]?.length ? serviceModels[s.id] : [s.model].filter(Boolean);
+            return { service: s, list: full.filter((m) => !isPinned(s.id, m)) };
+        })
+        .filter((g) => g.list.length > 0);
     // 有得选才做下拉：多个服务，或者某个服务下不止一个模型
-    const hasChoice =
-        studyList.length > 1 ||
-        studyList.some((s) => (serviceModels[s.id]?.length ?? 0) > 1);
+    const hasChoice = studyList.length > 1 || studyList.some((s) => (serviceModels[s.id]?.length ?? 0) > 1);
     // 当前选的模型和上次实际翻的不是同一个：提示重译，但不自动发请求
 
     // 导出：选中了就只导选中的，没选就导全部
@@ -559,9 +568,7 @@ export default function StudyArea() {
         const d = new Date();
         const pad = (n) => String(n).padStart(2, '0');
         const name = `${t(
-            copyModeRef.current === 'target'
-                ? 'translate.study_export_prefix'
-                : 'translate.study_export_prefix_both'
+            copyModeRef.current === 'target' ? 'translate.study_export_prefix' : 'translate.study_export_prefix_both'
         )}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.md`;
         try {
             const path = await save({
@@ -575,216 +582,290 @@ export default function StudyArea() {
 
     return (
         <>
-        <Card shadow='none' className='bg-content1 rounded-[14px]'>
-            <CardHeader className='flex justify-between pl-0 pr-2 pt-2.5 pb-1 bg-content1 rounded-t-[14px]'>
-                <div className='flex items-center gap-2 pl-2 text-[13px] text-default-500 min-w-0'>
-                    {hasChoice ? (
-                        <Dropdown onOpenChange={setMenuOpen}>
-                            <DropdownTrigger>
-                                <Button
-                                    size='sm'
-                                    variant='light'
-                                    className='h-[24px] min-w-0 px-1 text-[13px] text-default-500 rounded-full'
-                                    endContent={<LuChevronDown className='text-[13px]' />}
-                                >
-                                    {shortModel(modelLabel) || serviceLabel}
-                                </Button>
-                            </DropdownTrigger>
-                            <DropdownMenu
-                                aria-label='study service'
-                                selectionMode='single'
-                                selectedKeys={[`${name}::${modelLabel}`]}
-                                className='max-h-[320px] overflow-y-auto'
-                                onAction={(k) => {
-                                    const key = String(k);
-                                    const sep = key.indexOf('::');
-                                    const sid = key.slice(0, sep);
-                                    const m = key.slice(sep + 2);
-                                    if (sid !== name) setStudyServiceId(sid);
-                                    // 写回服务条目：模型只有这一份，设置页会同步看到
-                                    setStudyServices(
-                                        studyList.map((s) =>
-                                            s.id === sid ? { ...s, model: m } : s
-                                        )
-                                    );
+            <Card
+                shadow='none'
+                className='bg-content1 rounded-[14px]'
+            >
+                <CardHeader className='flex justify-between pl-0 pr-2 pt-2.5 pb-1 bg-content1 rounded-t-[14px]'>
+                    <div className='flex items-center gap-2 pl-2 text-[13px] text-default-500 min-w-0'>
+                        {hasChoice ? (
+                            <Popover
+                                isOpen={menuOpen}
+                                onOpenChange={setMenuOpen}
+                                placement='bottom-start'
+                                offset={4}
+                            >
+                                <PopoverTrigger>
+                                    <Button
+                                        size='sm'
+                                        variant='light'
+                                        className='h-[24px] min-w-0 px-1 text-[13px] text-default-500 rounded-full'
+                                        endContent={<LuChevronDown className='text-[13px]' />}
+                                    >
+                                        {shortModel(modelLabel) || serviceLabel}
+                                    </Button>
+                                </PopoverTrigger>
+                                {/* style 落在 PopoverContent 里面这层：
+                                    外层是定位壳，maxHeight 写在那里约束不到内容 */}
+                                <PopoverContent className='p-0'>
+                                    <div
+                                        className='flex flex-col overflow-hidden rounded-large'
+                                        style={{
+                                            width: 260,
+                                            maxWidth: 'calc(100vw - 24px)',
+                                            maxHeight: 'min(320px, 60vh)',
+                                        }}
+                                    >
+                                        <div className='min-h-0 flex-1 overflow-y-auto py-1'>
+                                            {pinnedList.length > 0 && (
+                                                <div>
+                                                    <p className='px-2 pb-0.5 pt-1 text-tiny text-default-400'>
+                                                        {t('config.study.pinned_title')}
+                                                    </p>
+                                                    {pinnedList.map((pin) => {
+                                                        const svc = studyList.find((s) => s.id === pin.sid);
+                                                        const selected = pin.sid === name && pin.model === modelLabel;
+                                                        return (
+                                                            <div
+                                                                key={`pin::${pin.sid}::${pin.model}`}
+                                                                className={`flex items-center gap-1 rounded-small pr-1 ${
+                                                                    selected ? 'bg-primary/10' : 'hover:bg-default-100'
+                                                                }`}
+                                                            >
+                                                                <button
+                                                                    type='button'
+                                                                    onClick={() => pickModelOf(pin.sid, pin.model)}
+                                                                    className='flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-[13px]'
+                                                                >
+                                                                    <span className='flex w-3.5 shrink-0 items-center justify-center'>
+                                                                        {selected && (
+                                                                            <LuCheck className='text-[12px] text-primary' />
+                                                                        )}
+                                                                    </span>
+                                                                    <span className='min-w-0 flex-1 truncate'>
+                                                                        {shortModel(pin.model)}
+                                                                    </span>
+                                                                    {svc?.name && (
+                                                                        <span className='max-w-[84px] shrink-0 truncate text-tiny text-default-400'>
+                                                                            {svc.name}
+                                                                        </span>
+                                                                    )}
+                                                                </button>
+                                                                <button
+                                                                    type='button'
+                                                                    title={t('config.study.star_toggle')}
+                                                                    onClick={() => toggleStar(pin.sid, pin.model)}
+                                                                    className='shrink-0 rounded-small p-1 text-[12px] text-warning transition-colors'
+                                                                >
+                                                                    <LuStar fill='currentColor' />
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                            {modelGroups.map((g, gi) => (
+                                                <div key={g.service.id}>
+                                                    {(pinnedList.length > 0 || gi > 0) && (
+                                                        <div className='my-1 h-px bg-default-100' />
+                                                    )}
+                                                    <p className='px-2 pb-0.5 pt-1 text-tiny text-default-400'>
+                                                        {g.service.name || g.service.id}
+                                                    </p>
+                                                    {g.list.map((m) => {
+                                                        const selected = g.service.id === name && m === modelLabel;
+                                                        return (
+                                                            <div
+                                                                key={`${g.service.id}::${m}`}
+                                                                className={`flex items-center gap-1 rounded-small pr-1 ${
+                                                                    selected ? 'bg-primary/10' : 'hover:bg-default-100'
+                                                                }`}
+                                                            >
+                                                                <button
+                                                                    type='button'
+                                                                    onClick={() => pickModelOf(g.service.id, m)}
+                                                                    className='flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-[13px]'
+                                                                >
+                                                                    <span className='flex w-3.5 shrink-0 items-center justify-center'>
+                                                                        {selected && (
+                                                                            <LuCheck className='text-[12px] text-primary' />
+                                                                        )}
+                                                                    </span>
+                                                                    <span className='min-w-0 flex-1 truncate'>
+                                                                        {shortModel(m)}
+                                                                    </span>
+                                                                </button>
+                                                                <button
+                                                                    type='button'
+                                                                    title={t('config.study.star_toggle')}
+                                                                    onClick={() => toggleStar(g.service.id, m)}
+                                                                    className='shrink-0 rounded-small p-1 text-[12px] text-default-300 transition-colors hover:text-default-500'
+                                                                >
+                                                                    <LuStar fill='none' />
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
+                        ) : (
+                            <span className='truncate'>{shortModel(modelLabel) || serviceLabel}</span>
+                        )}
+                        <span className='text-default-300'>·</span>
+                        <span>{t('translate.study_sentences', { n: pairs.length })}</span>
+                        {batchInfo && (
+                            <>
+                                <span className='text-default-300'>·</span>
+                                <span>{batchInfo}</span>
+                            </>
+                        )}
+                        {isLoading && (
+                            <Spinner
+                                size='sm'
+                                color='default'
+                            />
+                        )}
+                    </div>
+                    <div className='flex items-center gap-1 shrink-0'>
+                        {/* 复制/导出的内容形态：切换后立即影响下一次复制与保存 */}
+                        <div className='flex items-center rounded-full bg-default-100 p-[2px] text-[11px] shrink-0 mr-0.5'>
+                            <button
+                                type='button'
+                                className={`px-[7px] py-[1px] rounded-full transition-colors ${
+                                    copyMode === 'target' ? 'text-default-500' : 'bg-content1 text-foreground shadow-sm'
+                                }`}
+                                onClick={() => setCopyMode('both')}
+                            >
+                                {t('translate.study_copy_both')}
+                            </button>
+                            <button
+                                type='button'
+                                className={`px-[7px] py-[1px] rounded-full transition-colors ${
+                                    copyMode === 'target' ? 'bg-content1 text-foreground shadow-sm' : 'text-default-500'
+                                }`}
+                                onClick={() => setCopyMode('target')}
+                            >
+                                {t('translate.study_copy_target')}
+                            </button>
+                        </div>
+                        <Tooltip
+                            content={
+                                selected.size > 0
+                                    ? t('translate.study_copy_selected', { n: selected.size })
+                                    : t('translate.study_copy_all')
+                            }
+                        >
+                            <Button
+                                isIconOnly
+                                variant='light'
+                                size='sm'
+                                className='rounded-full'
+                                onPress={handleCopy}
+                            >
+                                {copied ? (
+                                    <LuCheck className='text-[15px] text-success' />
+                                ) : (
+                                    <LuCopy className='text-[15px]' />
+                                )}
+                            </Button>
+                        </Tooltip>
+                        <Tooltip
+                            content={
+                                selected.size > 0
+                                    ? t('translate.study_save_selected', { n: selected.size })
+                                    : t('translate.study_save_all')
+                            }
+                        >
+                            <Button
+                                isIconOnly
+                                variant='light'
+                                size='sm'
+                                className='rounded-full'
+                                onPress={handleSave}
+                            >
+                                <LuDownload className='text-[15px]' />
+                            </Button>
+                        </Tooltip>
+                        <Tooltip
+                            content={
+                                modelChanged
+                                    ? t('translate.study_retranslate_new', {
+                                          name: shortModel(modelLabel),
+                                      })
+                                    : t('translate.translate')
+                            }
+                        >
+                            <Button
+                                isIconOnly
+                                variant={modelChanged ? 'flat' : 'light'}
+                                color={modelChanged ? 'primary' : 'default'}
+                                size='sm'
+                                className='rounded-full'
+                                onPress={() => {
+                                    const sentences = pairs.map((p) => p.src);
+                                    if (sentences.length) runTranslate(sentences);
                                 }}
                             >
-                                {studyList.map((s) => {
-                                    // 拉不到列表时至少把默认模型列出来，不然这一组是空的
-                                    const list = serviceModels[s.id]?.length
-                                        ? serviceModels[s.id]
-                                        : [s.model].filter(Boolean);
-                                    return (
-                                        <DropdownSection
-                                            key={s.id}
-                                            title={s.name || s.id}
-                                            showDivider
-                                        >
-                                            {list.map((m) => (
-                                                <DropdownItem key={`${s.id}::${m}`}>
-                                                    {shortModel(m)}
-                                                </DropdownItem>
-                                            ))}
-                                        </DropdownSection>
-                                    );
-                                })}
-                            </DropdownMenu>
-                        </Dropdown>
-                    ) : (
-                        <span className='truncate'>{shortModel(modelLabel) || serviceLabel}</span>
-                    )}
-                    <span className='text-default-300'>·</span>
-                    <span>{t('translate.study_sentences', { n: pairs.length })}</span>
-                    {batchInfo && (
-                        <>
-                            <span className='text-default-300'>·</span>
-                            <span>{batchInfo}</span>
-                        </>
-                    )}
-                    {isLoading && <Spinner size='sm' color='default' />}
-                </div>
-                <div className='flex items-center gap-1 shrink-0'>
-                    {/* 复制/导出的内容形态：切换后立即影响下一次复制与保存 */}
-                    <div className='flex items-center rounded-full bg-default-100 p-[2px] text-[11px] shrink-0 mr-0.5'>
-                        <button
-                            type='button'
-                            className={`px-[7px] py-[1px] rounded-full transition-colors ${
-                                copyMode === 'target'
-                                    ? 'text-default-500'
-                                    : 'bg-content1 text-foreground shadow-sm'
-                            }`}
-                            onClick={() => setCopyMode('both')}
-                        >
-                            {t('translate.study_copy_both')}
-                        </button>
-                        <button
-                            type='button'
-                            className={`px-[7px] py-[1px] rounded-full transition-colors ${
-                                copyMode === 'target'
-                                    ? 'bg-content1 text-foreground shadow-sm'
-                                    : 'text-default-500'
-                            }`}
-                            onClick={() => setCopyMode('target')}
-                        >
-                            {t('translate.study_copy_target')}
-                        </button>
+                                <LuRefreshCw className='text-[15px]' />
+                            </Button>
+                        </Tooltip>
                     </div>
-                    <Tooltip
-                        content={
-                            selected.size > 0
-                                ? t('translate.study_copy_selected', { n: selected.size })
-                                : t('translate.study_copy_all')
-                        }
-                    >
-                        <Button
-                            isIconOnly
-                            variant='light'
-                            size='sm'
-                            className='rounded-full'
-                            onPress={handleCopy}
-                        >
-                            {copied ? (
-                                <LuCheck className='text-[15px] text-success' />
-                            ) : (
-                                <LuCopy className='text-[15px]' />
-                            )}
-                        </Button>
-                    </Tooltip>
-                    <Tooltip
-                        content={
-                            selected.size > 0
-                                ? t('translate.study_save_selected', { n: selected.size })
-                                : t('translate.study_save_all')
-                        }
-                    >
-                        <Button
-                            isIconOnly
-                            variant='light'
-                            size='sm'
-                            className='rounded-full'
-                            onPress={handleSave}
-                        >
-                            <LuDownload className='text-[15px]' />
-                        </Button>
-                    </Tooltip>
-                    <Tooltip
-                        content={
-                            modelChanged
-                                ? t('translate.study_retranslate_new', {
-                                      name: shortModel(modelLabel),
-                                  })
-                                : t('translate.translate')
-                        }
-                    >
-                        <Button
-                            isIconOnly
-                            variant={modelChanged ? 'flat' : 'light'}
-                            color={modelChanged ? 'primary' : 'default'}
-                            size='sm'
-                            className='rounded-full'
-                            onPress={() => {
-                                const sentences = pairs.map((p) => p.src);
-                                if (sentences.length) runTranslate(sentences);
-                            }}
-                        >
-                            <LuRefreshCw className='text-[15px]' />
-                        </Button>
-                    </Tooltip>
-                </div>
-            </CardHeader>
-            <CardBody className='bg-content1 px-3 pt-2 pb-0.5'>
-                {error ? (
-                    <div className='text-[13px] text-danger py-2 break-all'>{error}</div>
-                ) : studyList.length === 0 ? (
-                    <div className='flex items-center justify-between gap-2 py-2'>
-                        <span className='text-[13px] text-default-400'>
-                            {t('translate.study_no_service')}
-                        </span>
-                        <Button
-                            size='sm'
-                            variant='flat'
-                            color='primary'
-                            className='shrink-0 rounded-full'
-                            onPress={() => {
-                                invoke('open_config_window').catch(() => {});
-                            }}
-                        >
-                            {t('config.study.label')}
-                        </Button>
-                    </div>
-                ) : (
-                    <div className='flex flex-col'>
-                        {pairs.map((p, i) => (
-                            <div
-                                key={i}
-                                onClick={() => toggleSelect(i)}
-                                className={`my-0.5 py-2 px-2 -mx-2 rounded-lg border-b last:border-0 cursor-pointer transition-colors ${
-                                    selected.has(i)
-                                        ? 'bg-primary/10 border-transparent'
-                                        : 'border-default-100 hover:bg-default-100/60'
-                                }`}
+                </CardHeader>
+                <CardBody className='bg-content1 px-3 pt-2 pb-0.5'>
+                    {error ? (
+                        <div className='text-[13px] text-danger py-2 break-all'>{error}</div>
+                    ) : studyList.length === 0 ? (
+                        <div className='flex items-center justify-between gap-2 py-2'>
+                            <span className='text-[13px] text-default-400'>{t('translate.study_no_service')}</span>
+                            <Button
+                                size='sm'
+                                variant='flat'
+                                color='primary'
+                                className='shrink-0 rounded-full'
+                                onPress={() => {
+                                    invoke('open_config_window').catch(() => {});
+                                }}
                             >
+                                {t('config.study.label')}
+                            </Button>
+                        </div>
+                    ) : (
+                        <div className='flex flex-col'>
+                            {pairs.map((p, i) => (
                                 <div
-                                    className='text-default-700 leading-[1.65]'
-                                    style={{ fontSize: `${appFontSize}px` }}
-                                >
-                                    {p.src}
-                                </div>
-                                <div
-                                    className={`leading-[1.65] mt-1 ${
-                                        p.error ? 'text-danger' : 'text-default-500'
+                                    key={i}
+                                    onClick={() => toggleSelect(i)}
+                                    className={`my-0.5 py-2 px-2 -mx-2 rounded-lg border-b last:border-0 cursor-pointer transition-colors ${
+                                        selected.has(i)
+                                            ? 'bg-primary/10 border-transparent'
+                                            : 'border-default-100 hover:bg-default-100/60'
                                     }`}
-                                    style={{ fontSize: `${appFontSize}px` }}
                                 >
-                                    {p.error || p.dst || (isLoading ? '…' : '')}
+                                    <div
+                                        className='text-default-700 leading-[1.65]'
+                                        style={{ fontSize: `${appFontSize}px` }}
+                                    >
+                                        {p.src}
+                                    </div>
+                                    <div
+                                        className={`leading-[1.65] mt-1 ${
+                                            p.error ? 'text-danger' : 'text-default-500'
+                                        }`}
+                                        style={{ fontSize: `${appFontSize}px` }}
+                                    >
+                                        {p.error || p.dst || (isLoading ? '…' : '')}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </CardBody>
-        </Card>
-        <div className='h-[10px] shrink-0' />
+                            ))}
+                        </div>
+                    )}
+                </CardBody>
+            </Card>
+            <div className='h-[10px] shrink-0' />
         </>
     );
 }

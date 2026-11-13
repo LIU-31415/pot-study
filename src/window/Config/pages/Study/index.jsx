@@ -1,36 +1,14 @@
-import {
-    Button,
-    Card,
-    CardBody,
-    Input,
-    Modal,
-    ModalBody,
-    ModalContent,
-    ModalHeader,
-    Radio,
-    RadioGroup,
-    Select,
-    SelectItem,
-} from '@nextui-org/react';
+import { Button, Card, CardBody, Input, Modal, ModalBody, ModalContent, ModalHeader } from '@nextui-org/react';
 import { toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import React, { useEffect, useRef, useState } from 'react';
-import {
-    LuChevronLeft,
-    LuPencil,
-    LuPlus,
-    LuRefreshCw,
-    LuSettings2,
-    LuTrash2,
-    LuX,
-} from 'react-icons/lu';
+import { LuLink, LuPencil, LuPlus, LuRefreshCw, LuTrash2, LuX } from 'react-icons/lu';
 
+import ModelPicker from './ModelPicker';
+import StudySelect from './StudySelect';
 import { useConfig, useToastStyle } from '../../../../hooks';
 import { store } from '../../../../utils/store';
-import {
-    createServiceInstanceKey,
-    INSTANCE_NAME_CONFIG_KEY,
-} from '../../../../utils/service_instance';
+import { createServiceInstanceKey, INSTANCE_NAME_CONFIG_KEY } from '../../../../utils/service_instance';
 import { defaultRequestArguments } from '../../../../services/translate/openai/Config';
 import {
     normalizeInputUrl,
@@ -56,25 +34,39 @@ function newId() {
     return `study_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// 服务下拉里的两个操作项，不是真服务，所以用不会和 id 撞的前缀
+const ADD_SERVICE_KEY = '__add_service__';
+const ADD_LOCAL_KEY = '__add_local__';
+
+// 模型名去掉供应商前缀：agi-tongji-edu/GLM-5.3-Flash → GLM-5.3-Flash
+function shortModel(m) {
+    return (
+        String(m ?? '')
+            .split('/')
+            .pop() || ''
+    );
+}
+
 export default function Study() {
     const { t } = useTranslation();
     const toastStyle = useToastStyle();
     const [studyServices, setStudyServices] = useConfig('study_services', []);
     const [studyServiceId, setStudyServiceId] = useConfig('study_service_id', '');
     // 单向导出目标：翻译服务列表
-    const [translateServiceList, setTranslateServiceList] = useConfig(
-        'translate_service_list',
-        []
-    );
+    const [translateServiceList, setTranslateServiceList] = useConfig('translate_service_list', []);
+    // 星标模型：一份列表跨服务共用，换服务不用重新标
+    // 常用预设：{ sid, model } 组合，可以跨服务，点一下就连服务带模型一起切过去
+    const [pinnedModels, setPinnedModels] = useConfig('study_pinned_models', []);
 
     const [models, setModels] = useState([]);
+    // 被过滤掉的非对话模型数量，只在模型面板底部提示一句
+    const [hiddenModels, setHiddenModels] = useState(0);
     // 模型列表请求序号：服务切得快时，先发的慢响应不能覆盖后发的
     const modelReqRef = useRef(0);
     const [modelLoading, setModelLoading] = useState(false);
     const [modelError, setModelError] = useState('');
 
-    // 服务管理弹窗：列表视图 / 表单视图
-    const [managerOpen, setManagerOpen] = useState(false);
+    // 服务表单弹窗：只用来新增或编辑一条服务，选服务走页面上的下拉
     const [formOpen, setFormOpen] = useState(false);
     const [editingId, setEditingId] = useState('');
     const [fName, setFName] = useState('');
@@ -148,6 +140,7 @@ export default function Study() {
         ) {
             lastDetectedRef.current = null; // 用一次就作废，避免后续误用
             setModels(cached.models);
+            setHiddenModels(cached.hidden ?? 0);
             setModelError('');
             setModelLoading(false);
             return;
@@ -155,12 +148,14 @@ export default function Study() {
         setModelLoading(true);
         setModelError('');
         try {
-            const { models: arr } = await fetchModelList(entry.url, entry.apiKey);
+            const { models: arr, hidden } = await fetchModelList(entry.url, entry.apiKey);
             if (reqId !== modelReqRef.current) return;
             setModels(arr);
+            setHiddenModels(hidden ?? 0);
         } catch (e) {
             if (reqId !== modelReqRef.current) return;
             setModels([]);
+            setHiddenModels(0);
             setModelError(String(e?.message ?? e));
         } finally {
             if (reqId === modelReqRef.current) setModelLoading(false);
@@ -172,6 +167,7 @@ export default function Study() {
             loadModels(active);
         } else {
             setModels([]);
+            setHiddenModels(0);
             setModelError('');
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -180,17 +176,27 @@ export default function Study() {
     // 模型选择写回当前服务条目
     const pickModel = (model) => {
         if (!active) return;
-        setStudyServices(
-            services.map((s) => (s.id === active.id ? { ...s, model } : s))
-        );
+        setStudyServices(services.map((s) => (s.id === active.id ? { ...s, model } : s)));
+    };
+
+    // 星标切换：收藏的是「哪个服务 + 哪个模型」，所以能跨服务当预设用
+    const togglePin = (sid, model) => {
+        const list = pinnedModels ?? [];
+        const exists = list.some((p) => p.sid === sid && p.model === model);
+        setPinnedModels(exists ? list.filter((p) => !(p.sid === sid && p.model === model)) : [...list, { sid, model }]);
+    };
+
+    // 点常用胶囊：服务和模型一起切
+    const applyPin = (pin) => {
+        if (!services.some((s) => s.id === pin.sid)) return;
+        setStudyServiceId(pin.sid);
+        setStudyServices(services.map((s) => (s.id === pin.sid ? { ...s, model: pin.model } : s)));
     };
 
     // 思考强度写回当前服务条目：'off' 关闭思考，其余给 effort，空串表示跟随模型默认
     const pickReasoning = (reasoningEffort) => {
         if (!active) return;
-        setStudyServices(
-            services.map((s) => (s.id === active.id ? { ...s, reasoningEffort } : s))
-        );
+        setStudyServices(services.map((s) => (s.id === active.id ? { ...s, reasoningEffort } : s)));
     };
 
     const resetForm = () => {
@@ -199,13 +205,11 @@ export default function Study() {
         setFUrl('');
         setFKey('');
         setFStatus(null);
-        setFormOpen(false);
     };
 
     const openAdd = () => {
         resetForm();
         setFormOpen(true);
-        setManagerOpen(true);
     };
 
     const openEdit = (entry) => {
@@ -215,12 +219,11 @@ export default function Study() {
         setFKey(entry.apiKey ?? '');
         setFStatus(null);
         setFormOpen(true);
-        setManagerOpen(true);
     };
 
-    const openManager = () => {
+    const closeForm = () => {
         resetForm();
-        setManagerOpen(true);
+        setFormOpen(false);
     };
 
     // 保存条目；detectedModels 传 undefined 表示没做检测（直接保存）
@@ -243,14 +246,11 @@ export default function Study() {
         const entry = old
             ? { ...old, name, url, apiKey: key, model }
             : { id: newId(), name, url, apiKey: key, model: detectedModels?.[0] ?? '' };
-        const next = old
-            ? services.map((s) => (s.id === editingId ? entry : s))
-            : [...services, entry];
+        const next = old ? services.map((s) => (s.id === editingId ? entry : s)) : [...services, entry];
         setStudyServices(next);
         setStudyServiceId(entry.id);
         if (detectedModels) setModels(detectedModels);
-        resetForm();
-        setManagerOpen(false);
+        closeForm();
     };
 
     const checkAndSave = async () => {
@@ -262,7 +262,7 @@ export default function Study() {
         setFChecking(true);
         setFStatus(null);
         try {
-            const { models: arr, url: usedUrl } = await fetchModelList(url, fKey);
+            const { models: arr, hidden, url: usedUrl } = await fetchModelList(url, fKey);
             if (arr.length === 0) throw new Error('empty model list');
             const finalUrl = toChatCompletionsUrl(usedUrl);
             // 把刚拿到的列表留给 loadModels，避免保存后又拉一遍
@@ -270,6 +270,7 @@ export default function Study() {
                 url: finalUrl,
                 apiKey: fKey,
                 models: arr,
+                hidden: hidden ?? 0,
                 ts: Date.now(),
             };
             saveEntry(finalUrl, fKey, arr);
@@ -292,6 +293,18 @@ export default function Study() {
         // 也要换算成完整端点：直接存 /v1 会被 openai 服务再拼一次，
         // 变成 /v1/v1/chat/completions，每句都失败
         saveEntry(toChatCompletionsUrl(url), fKey, undefined);
+    };
+
+    // 服务顺序只影响下拉里的排列，不动当前生效项；
+    // 想让常用的服务排到最上面时用它
+    const moveService = (id, dir) => {
+        const from = services.findIndex((s) => s.id === id);
+        const to = from + dir;
+        if (from < 0 || to < 0 || to >= services.length) return;
+        const next = [...services];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        setStudyServices(next);
     };
 
     const removeEntry = (id) => {
@@ -331,12 +344,9 @@ export default function Study() {
 
         // 地址和模型都相同就不重复创建，避免点几次攒出一堆重复实例。
         // 并行读：实例多时串行 await 会把按钮的响应拖成上百毫秒
-        const cfgs = await Promise.all(
-            list.map(async (k) => [k, (await store.get(k)) ?? {}])
-        );
+        const cfgs = await Promise.all(list.map(async (k) => [k, (await store.get(k)) ?? {}]));
         const dup = cfgs.find(
-            ([, cfg]) =>
-                cfg.requestPath === active.url && (cfg.model ?? '') === (active.model ?? '')
+            ([, cfg]) => cfg.requestPath === active.url && (cfg.model ?? '') === (active.model ?? '')
         );
         if (dup) {
             const [dupKey, dupCfg] = dup;
@@ -352,7 +362,9 @@ export default function Study() {
         const key = createServiceInstanceKey('openai');
         // 实例名只取模型名的最后一段：agi-tongji-edu/Kimi-K3.1-Pro → Kimi-K3.1-Pro
         // 服务名（magpie）或完整路径在服务列表里都认不出具体是哪个模型
-        const shortName = String(active.model || '').split('/').pop();
+        const shortName = String(active.model || '')
+            .split('/')
+            .pop();
         await store.set(key, {
             [INSTANCE_NAME_CONFIG_KEY]: shortName || active.name || 'OpenAI',
             service: 'openai',
@@ -374,31 +386,39 @@ export default function Study() {
         });
     };
 
-    const modelOptions =
-        models.length > 0 ? models : active?.model ? [active.model] : [];
+    // 模型面板的列表：拉不到时至少把当前配置的模型列出来，否则面板是空的、
+    // 连当前值都看不见；拉到了但当前值不在里面（旧配置选了已下架的模型）也补进去
+    const modelOptions = (() => {
+        const arr = models ?? [];
+        if (arr.length === 0) return active?.model ? [active.model] : [];
+        if (active?.model && !arr.includes(active.model)) return [active.model, ...arr];
+        return arr;
+    })();
 
-    // 手动重探：页面打开后才启动网关的情况
-    const checkLocalGateway = async () => {
-        setLocalChecking(true);
-        try {
-            const gw = await detectLocalGateway();
-            if (gw) {
-                setLocalFound(gw);
-            } else {
-                toast(t('config.study.local_not_found'), { duration: 6000, style: toastStyle });
+    // 添加本地网关：已探测到就直接加，没探测到先探一次。
+    // 已有别的服务时不切换生效项，只把新条目加进列表——
+    // 擅自改用户正在用的服务会很难排查。
+    const addLocalGateway = async () => {
+        let gw = localFound;
+        if (!gw) {
+            setLocalChecking(true);
+            // 探测最长 2.5 秒，下拉已经关上了，不给提示就是干等
+            const tid = toast.loading(t('config.study.local_probing'), { style: toastStyle });
+            try {
+                gw = await detectLocalGateway();
+            } finally {
+                toast.dismiss(tid);
+                setLocalChecking(false);
             }
-        } finally {
-            setLocalChecking(false);
+            if (!gw) {
+                toast(t('config.study.local_not_found'), { duration: 6000, style: toastStyle });
+                return;
+            }
+            setLocalFound(gw);
         }
-    };
-
-    // 添加探到的本地网关。已有别的服务时不切换生效项，
-    // 只把新条目加进列表——擅自改用户正在用的服务会很难排查。
-    const addLocalGateway = (gw) => {
         const existing = services.find((s) => s.url === gw.url);
         if (existing) {
             setStudyServiceId(existing.id);
-            setLocalFound(null);
             toast(t('config.study.local_exists', { name: existing.name }), {
                 duration: 3000,
                 style: toastStyle,
@@ -412,26 +432,29 @@ export default function Study() {
             apiKey: gw.apiKey,
             model: gw.models[0] ?? '',
         };
+        // 用户是在下拉里明确点了「添加本地网关」，加完就切过去用它；
+        // 顺带把刚探到的列表缓存起来，切过去时不必再拉一遍
+        lastDetectedRef.current = {
+            url: gw.url,
+            apiKey: gw.apiKey,
+            models: gw.models,
+            hidden: gw.hidden ?? 0,
+            ts: Date.now(),
+        };
         setStudyServices([...services, entry]);
-        if (services.length === 0) {
-            setStudyServiceId(entry.id);
-            // 只在空列表自动选中时才接管模型列表。
-            // 已有其他服务在生效时不能改 models：模型下拉会显示新网关的模型，
-            // 但 pickModel 写回的仍是当前生效那条，等于给 A 存了 B 的模型名。
-            setModels(gw.models);
-        }
-        setLocalFound(null);
+        setStudyServiceId(entry.id);
+        setModels(gw.models);
+        setHiddenModels(gw.hidden ?? 0);
         toast(t('config.study.local_added', { name: gw.name }), {
             duration: 3000,
             style: toastStyle,
         });
     };
 
-    const modalTitle = formOpen
-        ? editingId
-            ? t('config.study.edit_service_title')
-            : t('config.study.add_service_title')
-        : t('config.study.manager_title');
+    const modalTitle = editingId ? t('config.study.edit_service_title') : t('config.study.add_service_title');
+
+    // 常用预设里可能残留已删服务，渲染前滤掉
+    const pinnedList = (pinnedModels ?? []).filter((p) => services.some((s) => s.id === p.sid));
 
     return (
         <>
@@ -439,180 +462,215 @@ export default function Study() {
                 <CardBody>
                     <div className='mb-3'>
                         <h3 className='my-auto'>{t('config.study.service')}</h3>
-                        <p className='text-small text-default-500 mt-1'>
-                            {t('config.study.service_hint')}
-                        </p>
+                        <p className='text-small text-default-500 mt-1'>{t('config.study.service_hint')}</p>
                     </div>
 
-                    {/* 本地网关：探到了给一条可添加的提示，探不到给个手动检测入口 */}
-                    {localFound ? (
-                        <div className='mb-3 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5 flex items-center justify-between gap-2'>
-                            <div className='min-w-0'>
-                                <p className='text-small font-medium truncate'>
-                                    {t('config.study.local_found', { name: localFound.name })}
-                                </p>
-                                <p className='text-tiny text-default-400 truncate'>
-                                    {localFound.base} ·{' '}
-                                    {t('config.study.local_models', {
-                                        n: localFound.models.length,
-                                    })}
-                                </p>
+                    {/* 常用预设：收藏的模型跨服务列在这里，点一下连服务一起切 */}
+                    {pinnedList.length > 0 && (
+                        <div className='mb-4'>
+                            <div className='mb-1 flex h-6 items-center'>
+                                <p className='text-tiny text-default-500'>{t('config.study.pinned_title')}</p>
                             </div>
-                            <div className='flex items-center gap-1 shrink-0'>
-                                <Button
-                                    size='sm'
-                                    color='primary'
-                                    variant='flat'
-                                    className='rounded-full'
-                                    onPress={() => addLocalGateway(localFound)}
-                                >
-                                    {t('config.study.local_add')}
-                                </Button>
-                                <Button
-                                    size='sm'
-                                    isIconOnly
-                                    variant='light'
-                                    className='rounded-full text-default-400'
-                                    onPress={() => setLocalFound(null)}
-                                >
-                                    <LuX className='text-[14px]' />
-                                </Button>
+                            <div className='flex flex-wrap gap-1.5'>
+                                {pinnedList.map((pin) => {
+                                    const isActive = pin.sid === active?.id && pin.model === active?.model;
+                                    const svcName = services.find((s) => s.id === pin.sid)?.name ?? '';
+                                    return (
+                                        <div
+                                            key={`${pin.sid}::${pin.model}`}
+                                            className={`group flex items-center gap-1 rounded-full border py-2 pl-3 pr-1.5 text-tiny transition-colors ${
+                                                isActive
+                                                    ? 'border-primary/40 bg-primary/10 text-primary'
+                                                    : 'border-default-200 text-default-600 hover:border-default-400'
+                                            }`}
+                                        >
+                                            <button
+                                                type='button'
+                                                onClick={() => applyPin(pin)}
+                                                className='flex min-w-0 items-center gap-1'
+                                            >
+                                                <span className='max-w-[160px] truncate'>{shortModel(pin.model)}</span>
+                                                {!isActive && svcName && (
+                                                    <span className='max-w-[90px] truncate text-default-400'>
+                                                        {svcName}
+                                                    </span>
+                                                )}
+                                            </button>
+                                            <button
+                                                type='button'
+                                                title={t('config.study.pinned_remove')}
+                                                aria-label={t('config.study.pinned_remove')}
+                                                onClick={() => togglePin(pin.sid, pin.model)}
+                                                className='rounded-full p-1 text-default-300 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100'
+                                            >
+                                                <LuX className='text-[11px]' />
+                                            </button>
+                                        </div>
+                                    );
+                                })}
                             </div>
-                        </div>
-                    ) : (
-                        <div className='mb-3 flex items-center gap-2 flex-wrap'>
-                            <Button
-                                size='sm'
-                                variant='bordered'
-                                className='rounded-full'
-                                isLoading={localChecking}
-                                onPress={checkLocalGateway}
-                            >
-                                {t('config.study.detect_local')}
-                            </Button>
-                            <span className='text-tiny text-default-400'>
-                                {t('config.study.local_hint')}
-                            </span>
                         </div>
                     )}
 
-                    {services.length === 0 ? (
-                        <div className='py-6 flex flex-col items-center gap-3'>
-                            <p className='text-center text-default-500 text-small'>
-                                {t('config.study.no_service')}
-                            </p>
-                            <Button
-                                color='primary'
-                                size='sm'
-                                startContent={<LuPlus className='text-[15px]' />}
-                                onPress={openAdd}
-                            >
-                                {t('config.study.add_service_title')}
-                            </Button>
-                        </div>
-                    ) : (
-                        <>
-                            <div className='flex items-center gap-2 rounded-xl border border-default-200 px-3 py-2.5'>
-                                <div className='min-w-0 flex-1'>
-                                    <p className='text-small font-medium truncate'>
-                                        {active?.name || '-'}
-                                    </p>
-                                    <p className='text-tiny text-default-400 truncate'>
-                                        {active?.url || ''}
-                                    </p>
-                                </div>
-                                <Button
-                                    size='sm'
-                                    variant='flat'
-                                    className='shrink-0'
-                                    startContent={<LuSettings2 className='text-[14px]' />}
-                                    onPress={openManager}
-                                >
-                                    {t('config.study.manage')}
-                                </Button>
+                    {/* 服务选择：加服务、探本地网关都收在下拉里，
+                        不再为了加一条服务先开一个管理弹窗 */}
+                    <div className='flex items-end gap-2'>
+                        <div className='flex-1 min-w-0'>
+                            <div className='mb-1 flex h-6 items-center'>
+                                <p className='text-tiny text-default-500'>{t('config.study.service_select')}</p>
                             </div>
-
-                            <div className='mt-4 flex items-end gap-2'>
-                                <Select
-                                    label={t('config.study.model')}
-                                    className='flex-1'
-                                    selectedKeys={active?.model ? [active.model] : []}
-                                    onSelectionChange={(keys) => {
-                                        const v = Array.from(keys)[0];
-                                        if (v) pickModel(String(v));
-                                    }}
-                                    isDisabled={modelOptions.length === 0}
-                                    placeholder={
-                                        modelLoading
-                                            ? t('config.study.loading_models')
-                                            : modelError
-                                            ? t('config.study.model_error')
-                                            : t('config.study.pick_model')
+                            <StudySelect
+                                value={active?.id ?? ''}
+                                placeholder={t('config.study.no_service')}
+                                isDisabled={localChecking}
+                                items={[
+                                    ...services.map((s, i) => ({
+                                        key: s.id,
+                                        label: s.name || s.id,
+                                        description: s.url,
+                                        // 只有一个服务时不显示箭头，免得两个箭头全是灰的像坏了
+                                        ...(services.length > 1
+                                            ? {
+                                                  canMoveUp: i > 0,
+                                                  canMoveDown: i < services.length - 1,
+                                              }
+                                            : {}),
+                                    })),
+                                    {
+                                        key: ADD_SERVICE_KEY,
+                                        label: t('config.study.add_service_title'),
+                                        icon: <LuPlus className='text-[14px]' />,
+                                        dividerBefore: true,
+                                    },
+                                    {
+                                        key: ADD_LOCAL_KEY,
+                                        label: localChecking
+                                            ? t('config.study.local_probing')
+                                            : t('config.study.add_local_item'),
+                                        icon: <LuLink className='text-[14px]' />,
+                                    },
+                                ]}
+                                onSelect={(v) => {
+                                    if (v === ADD_SERVICE_KEY) {
+                                        openAdd();
+                                        return;
                                     }
-                                >
-                                    {modelOptions.map((m) => (
-                                        <SelectItem key={String(m)}>{String(m)}</SelectItem>
-                                    ))}
-                                </Select>
+                                    if (v === ADD_LOCAL_KEY) {
+                                        addLocalGateway();
+                                        return;
+                                    }
+                                    setStudyServiceId(v);
+                                }}
+                                onMove={moveService}
+                            />
+                        </div>
+                        {active && (
+                            <>
                                 <Button
                                     isIconOnly
                                     variant='flat'
-                                    className='mb-0.5'
-                                    onPress={() => active && loadModels(active)}
-                                    isLoading={modelLoading}
+                                    aria-label={t('config.study.edit_service_title')}
+                                    title={t('config.study.edit_service_title')}
+                                    className='shrink-0'
+                                    onPress={() => openEdit(active)}
                                 >
-                                    <LuRefreshCw className='text-[16px]' />
+                                    <LuPencil className='text-[15px]' />
                                 </Button>
+                                <Button
+                                    isIconOnly
+                                    variant='flat'
+                                    aria-label={t('config.study.delete_service')}
+                                    title={
+                                        pendingDelete === active.id
+                                            ? t('config.study.delete_confirm')
+                                            : t('config.study.delete_service')
+                                    }
+                                    className='shrink-0'
+                                    color={pendingDelete === active.id ? 'danger' : 'default'}
+                                    onPress={() => removeEntry(active.id)}
+                                >
+                                    <LuTrash2 className='text-[15px]' />
+                                </Button>
+                            </>
+                        )}
+                    </div>
+
+                    <div className='mt-4'>
+                        {/* 刷新放标题行，不占输入框宽度：不然模型框比思考强度框窄一截，
+                            两个框右边界对不上，看着就不像一组 */}
+                        <div className='mb-1 flex h-6 items-center justify-between gap-2'>
+                            <p className='text-tiny text-default-500'>{t('config.study.model')}</p>
+                            <Button
+                                isIconOnly
+                                size='sm'
+                                variant='light'
+                                aria-label={t('config.study.refresh_models')}
+                                title={t('config.study.refresh_models')}
+                                className='h-6 w-6 min-w-6 text-default-400 data-[hover=true]:text-default-600'
+                                onPress={() => active && loadModels(active)}
+                                isLoading={modelLoading}
+                            >
+                                <LuRefreshCw className='text-[13px]' />
+                            </Button>
+                        </div>
+                        <ModelPicker
+                            models={modelOptions}
+                            value={active?.model ?? ''}
+                            starred={(pinnedModels ?? []).filter((p) => p.sid === active?.id).map((p) => p.model)}
+                            hiddenCount={hiddenModels}
+                            error={modelError}
+                            placeholder={
+                                modelLoading
+                                    ? t('config.study.loading_models')
+                                    : modelError
+                                      ? t('config.study.model_error')
+                                      : t('config.study.pick_model')
+                            }
+                            onPick={pickModel}
+                            onToggleStar={(m) => active && togglePin(active.id, m)}
+                            isDisabled={modelOptions.length === 0}
+                        />
+                    </div>
+
+                    {/* 手填入口：只在模型列表拿不到时出现。列表正常时面板已经能选全部，
+                        再放一个同值输入框只会让人问「这是干啥的」。加载中不显示，避免闪烁 */}
+                    {models.length === 0 && !modelLoading && (
+                        <Input
+                            label={t('config.study.model_manual')}
+                            className='mt-2'
+                            size='sm'
+                            value={active?.model ?? ''}
+                            onValueChange={(v) => pickModel(v)}
+                            placeholder='GLM-5.3-Flash'
+                            description={t('config.study.model_manual_hint')}
+                        />
+                    )}
+
+                    {/* 和模型行同一套骨架：外部小标题 + 灰底输入框，
+                        不然两行一个标题在框里一个在框外，看着就不是一组 */}
+                    {reasoningAvailable && (
+                        <div className='mt-4'>
+                            <div className='mb-1 flex h-6 items-center'>
+                                <p className='text-tiny text-default-500'>{t('config.study.reasoning')}</p>
                             </div>
-
-                            {/* 手填入口：只在模型列表拿不到时出现。列表正常时下拉已经能选全部，
-                                再放一个同值输入框只会让人问「这是干啥的」。加载中不显示，避免闪烁 */}
-                            {models.length === 0 && !modelLoading && (
-                                <Input
-                                    label={t('config.study.model_manual')}
-                                    className='mt-2'
-                                    size='sm'
-                                    value={active?.model ?? ''}
-                                    onValueChange={(v) => pickModel(v)}
-                                    placeholder='GLM-5.3-Flash'
-                                    description={t('config.study.model_manual_hint')}
-                                />
-                            )}
-
-                            {reasoningAvailable && (
-                                <div className='mt-3'>
-                                    <Select
-                                        label={t('config.study.reasoning')}
-                                        selectedKeys={[active?.reasoningEffort || 'default']}
-                                        onSelectionChange={(keys) => {
-                                            const v = String(Array.from(keys)[0] ?? 'default');
-                                            pickReasoning(v === 'default' ? '' : v);
-                                        }}
-                                        isDisabled={!active}
-                                    >
-                                        <SelectItem key='default'>
-                                            {t('config.study.reasoning_default')}
-                                        </SelectItem>
-                                        <SelectItem key='off'>
-                                            {t('config.study.reasoning_off')}
-                                        </SelectItem>
-                                        <SelectItem key='low'>low</SelectItem>
-                                        <SelectItem key='medium'>medium</SelectItem>
-                                        <SelectItem key='high'>high</SelectItem>
-                                        <SelectItem key='max'>max</SelectItem>
-                                    </Select>
-                                    <p className='text-tiny text-default-400 mt-2 leading-relaxed'>
-                                        {t('config.study.reasoning_hint')}
-                                    </p>
-                                </div>
-                            )}
-
-                            {modelError && (
-                                <p className='text-tiny text-danger mt-2 break-all'>
-                                    {t('config.study.model_error_hint')} {modelError}
-                                </p>
-                            )}
-                        </>
+                            <StudySelect
+                                value={active?.reasoningEffort || 'default'}
+                                width='220px'
+                                isDisabled={!active}
+                                items={[
+                                    { key: 'default', label: t('config.study.reasoning_default') },
+                                    { key: 'off', label: t('config.study.reasoning_off') },
+                                    { key: 'low', label: 'low' },
+                                    { key: 'medium', label: 'medium' },
+                                    { key: 'high', label: 'high' },
+                                    { key: 'max', label: 'max' },
+                                ]}
+                                onSelect={(v) => pickReasoning(v === 'default' ? '' : v)}
+                            />
+                            <p className='text-tiny text-default-400 mt-1.5 leading-relaxed'>
+                                {t('config.study.reasoning_hint')}
+                            </p>
+                        </div>
                     )}
                 </CardBody>
             </Card>
@@ -623,9 +681,7 @@ export default function Study() {
                     <div className='flex items-center justify-between gap-3'>
                         <div className='min-w-0'>
                             <p className='text-small'>{t('config.study.export_title')}</p>
-                            <p className='text-tiny text-default-400 mt-0.5'>
-                                {t('config.study.export_hint')}
-                            </p>
+                            <p className='text-tiny text-default-400 mt-0.5'>{t('config.study.export_hint')}</p>
                         </div>
                         <Button
                             size='sm'
@@ -641,140 +697,62 @@ export default function Study() {
             </Card>
 
             <Modal
-                isOpen={managerOpen}
+                isOpen={formOpen}
                 onOpenChange={(open) => {
-                    if (!open) resetForm();
-                    setManagerOpen(open);
+                    if (open) setFormOpen(true);
+                    else closeForm();
                 }}
                 scrollBehavior='inside'
                 placement='center'
             >
                 <ModalContent className='max-h-[75vh]'>
-                    <ModalHeader className='flex items-center gap-1'>
-                        {formOpen && (
-                            <Button
-                                isIconOnly
-                                size='sm'
-                                variant='light'
-                                className='-ml-1 h-7 w-7 min-w-7'
-                                onPress={resetForm}
-                            >
-                                <LuChevronLeft className='text-[16px]' />
-                            </Button>
-                        )}
-                        {modalTitle}
-                    </ModalHeader>
+                    <ModalHeader>{modalTitle}</ModalHeader>
                     <ModalBody className='pb-6'>
-                        {formOpen ? (
-                            <div className='flex flex-col gap-3'>
-                                <p className='text-tiny text-default-400'>
-                                    {t('config.study.openai_only')}
-                                </p>
-                                <Input
-                                    size='sm'
-                                    label={t('config.study.service_name')}
-                                    value={fName}
-                                    onValueChange={setFName}
-                                />
-                                <Input
-                                    size='sm'
-                                    label={t('config.study.service_url')}
-                                    value={fUrl}
-                                    onValueChange={setFUrl}
-                                />
-                                <Input
-                                    size='sm'
-                                    type='password'
-                                    label={t('config.study.api_key')}
-                                    value={fKey}
-                                    onValueChange={setFKey}
-                                />
-                                <div className='flex flex-wrap items-center gap-2 mt-1'>
-                                    <Button
-                                        size='sm'
-                                        color='primary'
-                                        isLoading={fChecking}
-                                        onPress={checkAndSave}
-                                    >
-                                        {t('config.study.detect')}
-                                    </Button>
-                                    <Button
-                                        size='sm'
-                                        variant='light'
-                                        className='text-default-500'
-                                        onPress={saveDirectly}
-                                    >
-                                        {t('config.study.save_directly')}
-                                    </Button>
-                                </div>
-                                {fStatus && (
-                                    <p
-                                        className={`text-tiny ${
-                                            fStatus.ok ? 'text-success' : 'text-danger'
-                                        } break-all`}
-                                    >
-                                        {fStatus.text}
-                                    </p>
-                                )}
-                            </div>
-                        ) : (
-                            <>
-                                <RadioGroup
-                                    value={active?.id ?? ''}
-                                    onValueChange={(v) => {
-                                        setStudyServiceId(String(v));
-                                    }}
-                                    classNames={{ wrapper: 'gap-2' }}
-                                >
-                                    {services.map((s) => (
-                                        <div key={s.id} className='flex items-center gap-0.5'>
-                                            <Radio
-                                                value={s.id}
-                                                description={s.url}
-                                                classNames={{ base: 'flex-1' }}
-                                            >
-                                                {s.name || s.id}
-                                            </Radio>
-                                            <Button
-                                                isIconOnly
-                                                size='sm'
-                                                variant='light'
-                                                className='h-7 w-7 min-w-7'
-                                                onPress={() => openEdit(s)}
-                                            >
-                                                <LuPencil className='text-[13px]' />
-                                            </Button>
-                                            <Button
-                                                isIconOnly
-                                                size='sm'
-                                                variant='light'
-                                                className='h-7 w-7 min-w-7'
-                                                color={
-                                                    pendingDelete === s.id ? 'danger' : 'default'
-                                                }
-                                                title={
-                                                    pendingDelete === s.id
-                                                        ? t('config.study.delete_confirm')
-                                                        : ''
-                                                }
-                                                onPress={() => removeEntry(s.id)}
-                                            >
-                                                <LuTrash2 className='text-[13px]' />
-                                            </Button>
-                                        </div>
-                                    ))}
-                                </RadioGroup>
+                        <div className='flex flex-col gap-3'>
+                            <p className='text-tiny text-default-400'>{t('config.study.openai_only')}</p>
+                            <Input
+                                size='sm'
+                                label={t('config.study.service_name')}
+                                value={fName}
+                                onValueChange={setFName}
+                            />
+                            <Input
+                                size='sm'
+                                label={t('config.study.service_url')}
+                                value={fUrl}
+                                onValueChange={setFUrl}
+                            />
+                            <Input
+                                size='sm'
+                                type='password'
+                                label={t('config.study.api_key')}
+                                value={fKey}
+                                onValueChange={setFKey}
+                            />
+                            <div className='flex flex-wrap items-center gap-2 mt-1'>
                                 <Button
                                     size='sm'
-                                    variant='flat'
-                                    className='mt-2 self-start'
-                                    startContent={<LuPlus className='text-[14px]' />}
-                                    onPress={openAdd}
+                                    color='primary'
+                                    isLoading={fChecking}
+                                    onPress={checkAndSave}
                                 >
-                                    {t('config.study.add_service_title')}
+                                    {t('config.study.detect')}
                                 </Button>
-                            </>
-                        )}
+                                <Button
+                                    size='sm'
+                                    variant='light'
+                                    className='text-default-500'
+                                    onPress={saveDirectly}
+                                >
+                                    {t('config.study.save_directly')}
+                                </Button>
+                            </div>
+                            {fStatus && (
+                                <p className={`text-tiny ${fStatus.ok ? 'text-success' : 'text-danger'} break-all`}>
+                                    {fStatus.text}
+                                </p>
+                            )}
+                        </div>
                     </ModalBody>
                 </ModalContent>
             </Modal>

@@ -41,7 +41,7 @@ export function modelsUrlCandidates(normalizedUrl) {
         out.push(`${origin}${path}`);
     } else if (path.endsWith('/chat/completions')) {
         out.push(`${origin}${path.replace(/\/chat\/completions$/, '/models')}`);
-    } else if (path === '' ) {
+    } else if (path === '') {
         out.push(`${origin}/v1/models`);
         out.push(`${origin}/models`);
     } else {
@@ -73,20 +73,112 @@ async function getJson(url, headers) {
     }
 }
 
+// 网关自报的端点最可靠：有 chat/completions、responses、messages 之一，
+// 才是能对话的模型。magpie 会返回 native_endpoints，
+// 第三方 OpenAI 兼容服务通常只有 id，那就返回 null 交给名字判断。
+const CHAT_ENDPOINT_RE = /\/(chat\/completions|responses|messages)\b/;
+
+function endpointCanChat(m) {
+    if (!m || typeof m !== 'object') return null;
+    const eps = m.native_endpoints;
+    if (!Array.isArray(eps) || eps.length === 0) return null;
+    return eps.some((e) => CHAT_ENDPOINT_RE.test(String(e)));
+}
+
+// 返回 [{ id, chat }]，chat 为 true/false/null（null = 网关没说，靠名字猜）
 function parseModels(data) {
     const list = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
-    return list
-        .map((m) => (typeof m === 'string' ? m : m?.id))
-        .filter(Boolean)
-        .sort((a, b) => String(a).localeCompare(String(b)));
+    const out = [];
+    for (const m of list) {
+        const id = typeof m === 'string' ? m : m?.id;
+        if (!id) continue;
+        out.push({ id: String(id), chat: endpointCanChat(m) });
+    }
+    out.sort((a, b) => a.id.localeCompare(b.id));
+    return out;
+}
+
+// 非对话模型的名称特征：向量、重排、语音、图像、审核。
+// 这些模型挂在同一个 /v1/models 下，但发不了 chat/completions，
+// 出现在翻译模型列表里只会让人误选。
+// 只按名字判断，所以宁可漏放也不误杀：多模态对话模型（名字里带 vision / vl）照常保留。
+const NON_CHAT_KEYWORDS = [
+    'embed',
+    'rerank',
+    'whisper',
+    'tts',
+    'speech',
+    'audio',
+    'transcribe',
+    'moderation',
+    'dall-e',
+    'diffusion',
+    'image',
+    'imagen',
+    'flux',
+    'sdxl',
+    'midjourney',
+    'suno',
+    // 视频与动画：agnes-video-2.5 这类名字里没有 image，靠单独一条兜
+    'video',
+    'veo',
+    'sora',
+    'kling',
+    'runway',
+    'pika',
+    'seedance',
+    'hailuo',
+    'animate',
+    // 其余非对话产物：音乐、3D、OCR
+    'music',
+    'audiocraft',
+    'mesh',
+    'ocr',
+    'bge',
+    'gte-',
+    'text-similarity',
+    'realtime',
+    'babbage',
+    'curie',
+    'davinci',
+    // 老 completion 模型；不写成裸 ada，否则 canada 这类名字会被误杀
+    'text-ada',
+];
+
+export function isChatModel(name) {
+    const n = String(name ?? '').toLowerCase();
+    if (!n) return false;
+    return !NON_CHAT_KEYWORDS.some((k) => n.includes(k));
+}
+
+// 过滤模型列表，返回 { models, hidden }。
+// 网关自报端点优先（magpie 这种），没自报才按名字猜（第三方服务）。
+// 全被筛掉时回退原列表：宁可多显示几个，也不能给一个空下拉，
+// 名字判断本来就有猜的成分，不能让它把可用服务变成不可用。
+export function filterChatModels(list) {
+    const arr = Array.isArray(list) ? list : [];
+    const kept = [];
+    let hidden = 0;
+    for (const item of arr) {
+        const id = typeof item === 'string' ? item : item?.id;
+        if (!id) continue;
+        const chat = typeof item === 'string' ? null : item.chat;
+        const ok = chat === true ? true : chat === false ? false : isChatModel(id);
+        if (ok) kept.push(String(id));
+        else hidden++;
+    }
+    if (kept.length === 0) {
+        const all = arr.map((i) => (typeof i === 'string' ? i : i?.id)).filter(Boolean);
+        return { models: all, hidden: 0 };
+    }
+    return { models: kept, hidden };
 }
 
 // 自动检测：按候选地址逐个尝试，先 Bearer 鉴权，全部 401/403 时再补一轮 api-key。
-// 成功返回 { models, url }，失败抛出带各次尝试原因的 Error。
+// 成功返回 { models, hidden, url }（models 已滤掉非对话模型），
+// 失败抛出带各次尝试原因的 Error。
 export async function fetchModelList(inputUrl, apiKey) {
-    const normalized = /^https?:\/\//i.test(String(inputUrl ?? ''))
-        ? String(inputUrl)
-        : normalizeInputUrl(inputUrl);
+    const normalized = /^https?:\/\//i.test(String(inputUrl ?? '')) ? String(inputUrl) : normalizeInputUrl(inputUrl);
     const candidates = modelsUrlCandidates(normalized);
     if (candidates.length === 0) {
         throw new Error('invalid url');
@@ -96,8 +188,8 @@ export async function fetchModelList(inputUrl, apiKey) {
 
     for (const url of candidates) {
         try {
-            const models = parseModels(await getJson(url, { Authorization: `Bearer ${key}` }));
-            if (models.length > 0) return { models, url };
+            const raw = parseModels(await getJson(url, { Authorization: `Bearer ${key}` }));
+            if (raw.length > 0) return { ...filterChatModels(raw), url };
             errors.push(`${url}: empty model list`);
         } catch (e) {
             errors.push(`${url}: ${errMsg(e)}`);
@@ -106,8 +198,8 @@ export async function fetchModelList(inputUrl, apiKey) {
     // 部分网关（Azure 风格）用 api-key 头，补一轮兜底
     for (const url of candidates) {
         try {
-            const models = parseModels(await getJson(url, { 'api-key': key }));
-            if (models.length > 0) return { models, url };
+            const raw = parseModels(await getJson(url, { 'api-key': key }));
+            if (raw.length > 0) return { ...filterChatModels(raw), url };
         } catch {
             // 静默兜底，失败原因以 Bearer 一轮为准
         }
@@ -148,9 +240,7 @@ export function resolveActiveStudyService(services, id) {
 // 已知的本地网关。magpie（github.com/yetone/magpie）固定监听 127.0.0.1:3425，
 // 说 OpenAI 兼容协议，key 用 "magpie" 占位。
 // 以后加别的本地网关（Ollama、LM Studio 等）往这个列表里塞一条就行。
-export const LOCAL_GATEWAYS = [
-    { id: 'magpie', name: 'magpie', base: 'http://127.0.0.1:3425', apiKey: 'magpie' },
-];
+export const LOCAL_GATEWAYS = [{ id: 'magpie', name: 'magpie', base: 'http://127.0.0.1:3425', apiKey: 'magpie' }];
 
 // 判断一个接口地址是不是指向本地网关（magpie）。
 // 思考强度用的是 magpie 自己的 reasoning 字段，第三方服务不认这个写法（不报错但会忽略），
@@ -197,18 +287,19 @@ async function probeModels(url, apiKey) {
     }
 }
 
-// 探测本地网关。探到返回 { id, name, base, url, apiKey, models }，否则 null。
+// 探测本地网关。探到返回 { id, name, base, url, apiKey, models, hidden }，否则 null。
+// models 已滤掉非对话模型，和学习模式下拉看到的是同一份。
 export async function detectLocalGateway() {
     for (const gw of LOCAL_GATEWAYS) {
-        const models = await probeModels(`${gw.base}/v1/models`, gw.apiKey);
-        if (models && models.length > 0) {
+        const raw = await probeModels(`${gw.base}/v1/models`, gw.apiKey);
+        if (raw && raw.length > 0) {
             return {
                 id: gw.id,
                 name: gw.name,
                 base: gw.base,
                 url: toChatCompletionsUrl(`${gw.base}/v1/models`),
                 apiKey: gw.apiKey,
-                models,
+                ...filterChatModels(raw),
             };
         }
     }
