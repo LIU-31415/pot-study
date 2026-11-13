@@ -107,9 +107,11 @@ jobs:
                     - target: aarch64-apple-darwin
                       key: darwin-aarch64
                       arch: aarch64
-                      # 用明确的 macos-14 而不是 macos-latest：后者机器池紧张，
-                      # 3.1.1 发版时排队 15 分钟没分到机器被取消，Intel 那条用专用标签反而稳
-                      runner: macos-14
+                      # 用具体的 macos-15 而不是 macos-latest：后者机器池紧张，
+                      # 3.1.1 发版时排队 15 分钟没分到机器被取消。
+                      # 注意 macos-14 已不在 GitHub 支持的标签表里，
+                      # 2026-11 发 3.2.0 时它直接报「configuration not supported」秒失败
+                      runner: macos-15
                     - target: x86_64-apple-darwin
                       key: darwin-x86_64
                       arch: x64

@@ -104,7 +104,9 @@ tag 名去掉 `v` 就是版本号，CI 会自动写进 `package.json`、`tauri.c
 
 ## 八、macOS 的特殊说明
 
-**runner 标签**：Apple Silicon 用 `macos-14`，Intel 用 `macos-15-intel`。不要用 `macos-latest`——它是通用标签，机器池紧张时排队十几分钟分不到机器，3.1.1 发版时就被取消过一次。
+**runner 标签**：Apple Silicon 用 `macos-15`，Intel 用 `macos-15-intel`。不要用 `macos-latest`——它是通用标签，机器池紧张时排队十几分钟分不到机器，3.1.1 发版时就被取消过一次。
+
+**`macos-14` 已经失效**。GitHub 当前支持的 macOS 标签只有 `macos-15` / `macos-26` / `macos-latest`（arm64）和 `macos-15-intel` / `macos-26-intel`（Intel）。3.2.0 发版时用 `macos-14` 直接报 `The configuration 'macos-14-arm64-us-default' is not supported`，2 秒就失败。改标签时先对一下官方文档的表。
 
 没有 Apple 开发者证书，包是未签名的。macOS 15 之后用户首次打开会被拦，必须去「系统设置 → 隐私与安全性」点「仍要打开」，右键「打开」已经不管用。
 
