@@ -1,6 +1,6 @@
 # 发布与维护流程
 
-这份文档记录 Pot Study 的改动、发版和自动更新是怎么串起来的。所有内容都基于本机实测，不是照抄文档。
+这份文档记录 Pot Study 的改动、发版和自动更新流程，实际验证范围见第七节。
 
 ## 一、先认清几个关键位置
 
@@ -137,7 +137,7 @@ tag 名去掉 `v` 就是版本号，CI 会自动写进 `package.json`、`tauri.c
 
 ## 七、当前状态
 
-**已验证**：v3.1.0 和 v3.1.1 都完整走通了——三平台构建、签名、发布、update.json 生成，安装后配置保留。3.1.1 时 macOS arm64 因 `macos-latest` 排队 15 分钟没分到机器被取消，重跑成功；标签已改成 `macos-14`。
+**已验证**：v3.1.0 和 v3.1.1 都完整走通了——三平台构建、更新包签名、发布、update.json 生成，安装后配置保留。3.1.1 时 macOS arm64 因 `macos-latest` 排队 15 分钟没分到机器被取消，重跑成功；标签已改成 `macos-14`。
 
 **未验证**：自动更新本身还没跑过。要等下一次有实际改动的发版，在 3.1.1 上确认程序能弹出更新提示、点「更新」能下载安装并重启，整条链路才算闭环。
 
@@ -147,8 +147,19 @@ tag 名去掉 `v` 就是版本号，CI 会自动写进 `package.json`、`tauri.c
 
 **`macos-14` 已经失效**。GitHub 当前支持的 macOS 标签只有 `macos-15` / `macos-26` / `macos-latest`（arm64）和 `macos-15-intel` / `macos-26-intel`（Intel）。3.2.0 发版时用 `macos-14` 直接报 `The configuration 'macos-14-arm64-us-default' is not supported`，2 秒就失败。改标签时先对一下官方文档的表。
 
-没有 Apple 开发者证书，包是未签名的。macOS 15 之后用户首次打开会被拦，必须去「系统设置 → 隐私与安全性」点「仍要打开」，右键「打开」已经不管用。
+### 应用签名
 
-这段说明写在 `INSTALL.md` 里，CI 会自动把它拼在 Release 正文后面，不用每次重贴。
+当前没有 Apple 开发者证书，CI 使用完整的 ad-hoc 临时签名，无需 Apple 开发者账号。
 
-要消除这个提示得买 Apple 开发者账号（一年 99 美元）做签名和公证，暂时没做。
+构建顺序如下。
+
+1. 为作为资源打包的两个 OCR 程序签名。
+2. 设置 `APPLE_SIGNING_IDENTITY='-'`，由 Tauri 为主程序和整个 `.app` 签名。
+3. 由 Tauri 生成 `.dmg` 和 `.app.tar.gz`，并用现有 `TAURI_PRIVATE_KEY` 给更新归档生成 `.sig`。
+4. 使用 `codesign --verify --deep --strict` 校验 `.app`、解压后的更新包和挂载后的 DMG 内应用，同时单独校验 OCR 程序。任一步失败都会阻止该次发布。
+
+应用包完成签名后再生成安装包和更新包，后续步骤只复制产物。
+
+ad-hoc 签名提供完整性校验。当前尚未经过 Apple 公证，用户首次打开仍需允许运行，具体步骤见 `INSTALL.md`，CI 会将其附在 Release 正文后面。
+
+面向默认 Gatekeeper 设置的正式分发，需要 Apple Developer Program 账号、Developer ID Application 证书和公证凭据。取得这些材料后，可按 [Tauri v1 的签名与公证文档](https://v1.tauri.app/v1/guides/distribution/sign-macos/) 接入，完成公证并附加票据后再分发。

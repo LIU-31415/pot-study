@@ -152,13 +152,39 @@ jobs:
             - name: 安装依赖
               run: pnpm install
 
-            - name: 构建（含 updater 包与签名）
+            - name: 构建并签名 macOS 应用与更新包
+              shell: bash
               env:
                   TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
                   TAURI_KEY_PASSWORD: ''
-              # macOS 要 app（.app.tar.gz 的底座）+ dmg（安装包）+ updater（签名归档）；
-              # 不能沿用配置里的 nsis，那是 Windows 专用的
-              run: pnpm tauri build --config src-tauri/tauri.release.conf.json --target ${{ matrix.target }} --bundles app,dmg,updater
+                  # shortcut: 临时签名仍需首次手动放行，有 Developer ID 证书后接入签名和公证。
+                  APPLE_SIGNING_IDENTITY: '-'
+              run: |
+                  # OCR 程序作为资源打包，Tauri 不会自动为它们签名。
+                  for helper in src-tauri/resources/ocr-*-apple-darwin; do
+                    codesign --force --sign - "$helper"
+                  done
+                  # Tauri 先签完整 .app，再生成 dmg 和带更新签名的 .app.tar.gz。
+                  pnpm tauri build --config src-tauri/tauri.release.conf.json --target ${{ matrix.target }} --bundles app,dmg,updater
+
+            - name: 校验应用、安装包和更新包的代码签名
+              shell: bash
+              run: |
+                  BASE="src-tauri/target/${{ matrix.target }}/release/bundle"
+                  APP="$BASE/macos/Pot Study.app"
+                  codesign --verify --deep --strict --verbose=2 "$APP"
+                  for helper in "$APP"/Contents/Resources/resources/ocr-*-apple-darwin; do
+                    codesign --verify --strict --verbose=2 "$helper"
+                  done
+
+                  CHECK_DIR=$(mktemp -d)
+                  tar -xzf "$BASE/macos/Pot Study.app.tar.gz" -C "$CHECK_DIR"
+                  codesign --verify --deep --strict --verbose=2 "$CHECK_DIR/Pot Study.app"
+
+                  trap 'hdiutil detach "$CHECK_DIR/dmg" >/dev/null 2>&1 || true' EXIT
+                  hdiutil attach "$BASE/dmg/Pot Study_${{ steps.ver.outputs.version }}_${{ matrix.arch }}.dmg" \
+                    -mountpoint "$CHECK_DIR/dmg" -readonly -nobrowse
+                  codesign --verify --deep --strict --verbose=2 "$CHECK_DIR/dmg/Pot Study.app"
 
             - name: 重命名产物并生成更新片段
               run: |
