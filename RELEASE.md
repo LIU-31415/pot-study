@@ -44,12 +44,34 @@ push 到 master **不会**触发构建，只有打 tag 才会发版。可以放�
 
 ### CHANGELOG 怎么写
 
-写给装了这个软件的人看，不是写给改代码的人看。
+不要自己发明格式，照成熟项目的写法。看两个实际例子：
 
-- 只说这个版本比上个版本多了什么、哪里变好了，不写「改了什么实现」
-- 修 bug 写「之前什么表现，现在什么表现」，不写是哪行代码、哪个库的坑
-- **不写开发过程中自己造出来又修掉的错误**。用户从没见过那个问题，写上去只会让人困惑「我用的版本是不是坏的」
-- 不用类名、字段名、配置键名，这些对用户没有意义
+**Obsidian**（分组，每条一句话，重点是「现在怎样了」）：
+
+> ## New
+> - Added **Relevance** sort option that sorts notes based on the best match for your query.
+>
+> ## Improvements
+> - Results now appear much faster when a search matches thousands of notes.
+> - The search term explanation no longer flickers and shifts the results while you type.
+
+**EcoPaste**（中文，动词开头）：
+
+> ### ✨ 新功能
+> * 新增保存图片右键菜单
+>
+> ### 🐛 问题修复
+> * 防止应用卡死导致历史记录丢失
+
+所以我们这么写：
+
+- 三组：`新功能` / `改进` / `修复`
+- 每条一句话，动词开头：新增、现在可以、不再、修好了
+- 写用户能感知的变化，用「之前怎样、现在怎样」的对比，不写实现
+- 不用类名、字段名、配置键名，不加 commit 链接
+- **不写开发过程中自己造出来又修掉的错误**——用户从没见过那个问题，写上去只会让人怀疑自己用的版本是不是坏的
+
+写完自检一句：用户读完这条，能知道自己用的东西变在哪吗？答不上就删掉或重写。
 
 反例（3.2.0 初稿，已被指出）：
 
