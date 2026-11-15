@@ -8,6 +8,12 @@ import {
     Popover,
     PopoverContent,
     PopoverTrigger,
+    Modal,
+    ModalContent,
+    ModalHeader,
+    ModalBody,
+    ModalFooter,
+    Textarea,
 } from '@nextui-org/react';
 import { useAtomValue } from 'jotai';
 import React, { useEffect, useState, useRef } from 'react';
@@ -21,8 +27,12 @@ import * as builtinServices from '../../../../services/translate';
 import { useConfig } from '../../../../hooks';
 import { sourceTextAtom, detectLanguageAtom } from '../SourceArea';
 import { sourceLanguageAtom, targetLanguageAtom } from '../LanguageArea';
-import { splitSentences } from '../../../../utils/sentence';
-import { parseNumbered, getStudyError, buildStudyMarkdown } from '../../../../utils/study';
+import {
+    splitStudySentences,
+    replaceStudySentences,
+    translateStudySentences,
+    buildStudyMarkdown,
+} from '../../../../utils/study';
 import { resolveActiveStudyService, fetchModelList, isLocalGatewayUrl } from '../../../../utils/study_service';
 import { defaultRequestArguments } from '../../../../services/translate/openai/Config';
 
@@ -43,10 +53,6 @@ const STUDY_SYSTEM =
 
 const STUDY_USER =
     'Translate the following numbered sentences into $to.\n' + 'Keep the numbering. One line per sentence.\n\n$text';
-
-const BATCH_SIZE = 20;
-const MAX_SINGLE = 30;
-const MAX_PARALLEL = 3;
 
 // 思考强度：推理模型回答前会先走一遍思考链，翻译这种直译任务里那段基本白费时间。
 // 'off' 用 enabled:false 表达，其余给 effort；空值或未知值不传，跟随模型默认。
@@ -129,25 +135,28 @@ export default function StudyArea() {
     // 服务集合的指纹：增删服务时用它当依赖，数组引用每次 render 都变
     const serviceKey = studyList.map((s) => `${s.id}|${s.url ?? ''}`).join(',');
 
-    const [pairs, setPairs] = useState([]);
+    const [pairs, setPairsState] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState('');
     const [batchInfo, setBatchInfo] = useState('');
     const [selected, setSelected] = useState(() => new Set());
     const [copied, setCopied] = useState(false);
+    const [editingIndex, setEditingIndex] = useState(null);
+    const [editDraft, setEditDraft] = useState('');
     // 导出时读 ref，避开按钮 onPress 可能缓存旧闭包的问题
     const selectedRef = useRef(selected);
     const pairsRef = useRef([]);
+    const setPairs = (value) => {
+        pairsRef.current = value;
+        setPairsState(value);
+    };
     useEffect(() => {
         selectedRef.current = selected;
     }, [selected]);
-    useEffect(() => {
-        pairsRef.current = pairs;
-    }, [pairs]);
     const runId = useRef(0);
     const lastRenderRef = useRef(0);
     // 在跑的请求：重译/切模型/关窗口时要真取消，光靠 runId 只挡回写
     const abortRef = useRef(null);
+    const inFlightKey = useRef('');
 
     // 翻译请求里读 ref 而不是闭包：换了模型/服务不自动重译，
     // 但下一次真正发请求时必须用最新的那个
@@ -157,8 +166,8 @@ export default function StudyArea() {
     // 不重复花 token。纯内存，关窗口就没了。
     const CACHE_LIMIT = 8;
     const cacheRef = useRef(new Map());
-    const makeCacheKey = (act, text, src, tgt) =>
-        `${act?.id ?? ''}\u0001${act?.url ?? ''}\u0001${act?.model ?? ''}\u0001${act?.reasoningEffort ?? ''}\u0001${src}\u0001${tgt}\u0001${text ?? ''}`;
+    const makeCacheKey = (act, sentences, src, tgt) =>
+        JSON.stringify([act?.id, act?.url, act?.model, act?.reasoningEffort ?? '', src, tgt, sentences]);
     // 命中也重插一次：Map 的迭代顺序是插入顺序，不刷新的话
     // 常用的结果反而会被当成最早的删掉
     const touchCache = (k) => {
@@ -236,25 +245,18 @@ export default function StudyArea() {
         return tgtLang;
     };
 
-    const runTranslate = async (sentences, { force = false } = {}) => {
-        // 上一轮还在跑就取消掉，避免旧流继续占内存
-        abortRef.current?.abort();
-        // 冻结这一轮的配置：翻译途中切模型不能让后续批次改用新模型，
-        // 否则一批用 A 一批用 B，混合结果还会写进 A 的缓存
-        const act = activeRef.current;
-        const snapshot = {
-            url: act?.url,
-            apiKey: act?.apiKey,
-            model: act?.model,
-            reasoningEffort: act?.reasoningEffort,
-        };
+    const runTranslate = async (sentences, { force = false, indices = null } = {}) => {
+        // 每轮固定配置，重试部分句子时也要保留各句的实际来源。
+        const act = { ...activeRef.current };
         const effectiveTarget = computeTarget(sourceLanguage, targetLanguage, detectLanguage);
-        const cacheKey = makeCacheKey(act, sourceText, sourceLanguage, effectiveTarget);
-        const cached = force ? undefined : touchCache(cacheKey);
+        const cacheKey = makeCacheKey(act, sentences, sourceLanguage, effectiveTarget);
+        // 服务和语言配置可能在同一轮加载完成，共用同一个自动翻译任务。
+        if (!force && !indices && inFlightKey.current === cacheKey && !abortRef.current?.signal.aborted) return;
+        abortRef.current?.abort();
+        const id = ++runId.current;
+        const cached = force || indices ? undefined : touchCache(cacheKey);
         if (cached) {
-            // 这段文字已经用这个模型翻过：直接展示，不发请求
-            runId.current++;
-            setError('');
+            inFlightKey.current = '';
             setIsLoading(false);
             setBatchInfo('');
             setPairs(cached.map((p) => ({ ...p })));
@@ -262,130 +264,100 @@ export default function StudyArea() {
             setModelChanged(false);
             return;
         }
-        const id = ++runId.current;
         const controller = new AbortController();
         abortRef.current = controller;
-        setError('');
+        inFlightKey.current = cacheKey;
         setIsLoading(true);
         setModelChanged(false);
 
-        const total = sentences.length;
-        const batches = [];
-        if (total <= MAX_SINGLE) {
-            batches.push({ start: 0, count: total });
-        } else {
-            for (let i = 0; i < total; i += BATCH_SIZE) {
-                batches.push({ start: i, count: Math.min(BATCH_SIZE, total - i) });
-            }
-        }
-        setBatchInfo(batches.length > 1 ? t('translate.study_batches', { n: batches.length }) : '');
-
-        const acc = sentences.map((s) => ({ src: s, dst: '', error: '', pending: true }));
-        setPairs(acc.map((p) => ({ ...p })));
-
-        const translateBatch = async (batch) => {
-            const items = sentences.slice(batch.start, batch.start + batch.count);
-            try {
-                const LanguageEnum = builtinServices['openai'].Language;
-                const to = effectiveTarget;
-                if (!(sourceLanguage in LanguageEnum) || !(to in LanguageEnum)) {
-                    throw new Error('Language not supported');
-                }
-
-                const numbered = items.map((s, i) => `${i + 1}. ${s}`).join('\n');
-                const cfg = {
-                    service: 'openai',
-                    requestPath: snapshot.url ?? '',
-                    apiKey: snapshot.apiKey ?? '',
-                    model: snapshot.model ?? '',
-                    stream: true,
-                    requestArguments: JSON.stringify(buildRequestArguments(snapshot.url, snapshot.reasoningEffort)),
-                    promptList: [
-                        { role: 'system', content: STUDY_SYSTEM },
-                        { role: 'user', content: STUDY_USER },
-                    ],
-                };
-
-                const output = await builtinServices['openai'].translate(numbered, LanguageEnum[sourceLanguage], LanguageEnum[to], {
-                    config: cfg,
-                    detect: detectLanguage,
-                    signal: controller.signal,
-                    setResult: (v) => {
-                        if (runId.current !== id) return;
-                        const parsed = parseNumbered(v.replace(/_$/, ''), items.length);
-                        items.forEach((s, i) => {
-                            const gi = batch.start + i;
-                            acc[gi].dst = parsed[i].dst;
-                            acc[gi].error = '';
-                        });
-                        // 节流：流式碎片来得很快，每 120ms 最多重渲一次
-                        const now = Date.now();
-                        if (now - lastRenderRef.current < 120) return;
-                        lastRenderRef.current = now;
-                        setPairs(acc.map((p) => ({ ...p })));
-                    },
-                });
-                const parsed = parseNumbered(output, items.length);
-                items.forEach((s, i) => {
-                    const gi = batch.start + i;
-                    acc[gi].dst = parsed[i].dst;
-                    acc[gi].error = parsed[i].error;
-                    acc[gi].pending = false;
-                });
-                // 本批结束，强制渲染一次，避免节流漏掉最后一段
-                if (runId.current === id) {
-                    lastRenderRef.current = 0;
-                    setPairs(acc.map((p) => ({ ...p })));
-                }
-            } catch (e) {
-                if (runId.current !== id) return;
-                for (let i = 0; i < batch.count; i++) {
-                    acc[batch.start + i].error = getStudyError(e);
-                    acc[batch.start + i].pending = false;
-                }
-                setPairs(acc.map((p) => ({ ...p })));
-                throw e;
-            }
+        const requested = indices ?? sentences.map((_, index) => index);
+        const requestedSet = new Set(requested);
+        const requestKey = makeCacheKey(act, [], sourceLanguage, effectiveTarget);
+        const base = indices ? pairsRef.current : sentences.map((src) => ({ src, dst: '', error: '' }));
+        const resultModel = `${act.name || act.id || ''} · ${shortModel(act.model)}`;
+        const prepared = base.map((pair, index) =>
+            requestedSet.has(index) ? { ...pair, resultKey: requestKey, resultModel } : pair
+        );
+        const batchCount = requested.length <= 30 ? 1 : Math.ceil(requested.length / 20);
+        setBatchInfo(batchCount > 1 ? t('translate.study_batches', { n: batchCount }) : '');
+        const cfg = {
+            service: 'openai',
+            requestPath: act.url ?? '',
+            apiKey: act.apiKey ?? '',
+            model: act.model ?? '',
+            stream: true,
+            requestArguments: JSON.stringify(buildRequestArguments(act.url, act.reasoningEffort)),
+            promptList: [
+                { role: 'system', content: STUDY_SYSTEM },
+                { role: 'user', content: STUDY_USER },
+            ],
         };
-
         try {
-            let cursor = 0;
-            const workers = Array(Math.min(MAX_PARALLEL, batches.length))
-                .fill(0)
-                .map(async () => {
-                    while (cursor < batches.length) {
-                        // 任务已过期（换文/重译）就别再取新批，省 token
-                        if (runId.current !== id) return;
-                        const b = batches[cursor++];
-                        try {
-                            await translateBatch(b);
-                        } catch (e) {
-                            // 单批失败不影响其他批
-                        }
+            const result = await translateStudySentences({
+                pairs: prepared,
+                indices: requested,
+                signal: controller.signal,
+                request: (text, setResult) => {
+                    const languages = builtinServices.openai.Language;
+                    if (!(sourceLanguage in languages) || !(effectiveTarget in languages)) {
+                        throw new Error(t('translate.study_language_error'));
                     }
-                });
-            await Promise.all(workers);
-            // 全部批次跑完且没有失败才入缓存：
-            // 失败结果入缓存会导致恢复网络后重译直接命中，永远修不好
+                    if (!cfg.requestPath || !cfg.model) throw new Error(t('translate.study_service_required'));
+                    return builtinServices.openai.translate(
+                        text,
+                        languages[sourceLanguage],
+                        languages[effectiveTarget],
+                        {
+                            config: cfg,
+                            detect: detectLanguage,
+                            signal: controller.signal,
+                            setResult,
+                        }
+                    );
+                },
+                onUpdate: (next, flush) => {
+                    if (runId.current !== id) return;
+                    const copy = next.map((pair) => ({ ...pair }));
+                    pairsRef.current = copy;
+                    const now = Date.now();
+                    if (!flush && now - lastRenderRef.current < 120) return;
+                    lastRenderRef.current = now;
+                    setPairs(copy);
+                },
+            });
             if (runId.current === id) {
-                if (!acc.some((p) => p.error)) {
+                if (result.every((pair) => !pair.error && pair.dst && pair.resultKey === requestKey)) {
                     writeCache(
                         cacheKey,
-                        acc.map((p) => ({ ...p }))
+                        result.map((pair) => ({ ...pair }))
                     );
                 }
-                // 翻译途中换了模型或思考强度：这轮结果是旧配置跑的，
-                // 不能把「当前配置还没应用」的提示清掉，否则用户会以为新设置已经生效
-                const cur = activeRef.current;
-                const sameConfig =
-                    cur?.id === act?.id &&
-                    cur?.model === snapshot.model &&
-                    (cur?.reasoningEffort ?? '') === (snapshot.reasoningEffort ?? '');
-                if (sameConfig) setModelChanged(false);
+                const currentKey = makeCacheKey(activeRef.current, [], sourceLanguage, effectiveTarget);
+                setModelChanged(result.some((pair) => pair.resultKey !== currentKey));
             }
         } finally {
-            if (runId.current === id) setIsLoading(false);
+            if (runId.current === id) {
+                inFlightKey.current = '';
+                setIsLoading(false);
+            }
         }
+    };
+
+    const stopTranslate = () => {
+        runId.current++;
+        abortRef.current?.abort();
+        inFlightKey.current = '';
+        setPairs(
+            pairsRef.current.map((pair) => (pair.pending ? { ...pair, pending: false, error: 'study_stopped' } : pair))
+        );
+        setIsLoading(false);
+        setBatchInfo('');
+    };
+
+    const applySentenceEdit = (index, count, sentences) => {
+        setPairs(replaceStudySentences(pairsRef.current, index, count, sentences));
+        setSelected(new Set());
+        setModelChanged(true);
     };
 
     // 换模型或换服务时，这段文字要是用新选的模型翻过，直接切过去看，不发请求
@@ -394,7 +366,7 @@ export default function StudyArea() {
         if (!act?.model || !pairsRef.current.length) return;
         const key = makeCacheKey(
             act,
-            sourceText,
+            pairsRef.current.map((pair) => pair.src),
             sourceLanguage,
             computeTarget(sourceLanguage, targetLanguage, detectLanguage)
         );
@@ -413,7 +385,7 @@ export default function StudyArea() {
             setModelChanged(true);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [active?.id, active?.model, active?.reasoningEffort]);
+    }, [active?.id, active?.url, active?.model, active?.reasoningEffort]);
 
     // 从「没有可用服务」到「刚添加了第一个服务」：之前没东西可翻，
     // 现在得补一次，否则点重译也没反应（它只从已有 pairs 取句子）
@@ -421,7 +393,7 @@ export default function StudyArea() {
         if (!name) return;
         if (pairsRef.current.length) return;
         if (!sourceText || !sourceText.trim()) return;
-        const sentences = splitSentences(sourceText);
+        const sentences = splitStudySentences(sourceText);
         if (sentences.length) runTranslate(sentences);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [name]);
@@ -447,9 +419,11 @@ export default function StudyArea() {
     }, [serviceKey]);
 
     useEffect(() => {
+        setEditingIndex(null);
         if (!sourceText || !sourceText.trim()) {
             // 让在途请求失效，避免旧译文被写回
             runId.current++;
+            abortRef.current?.abort();
             setPairs([]);
             setSelected(new Set());
             setIsLoading(false);
@@ -460,7 +434,7 @@ export default function StudyArea() {
         // 源语言是 auto 时必须等检测结果：没检测出来就往下走，
         // to 会算成当前目标语言（中文），结果变成「中文改写中文」
         if (sourceLanguage === 'auto' && !detectLanguage) return undefined;
-        const sentences = splitSentences(sourceText);
+        const sentences = splitStudySentences(sourceText);
         if (sentences.length === 0) {
             runId.current++;
             setPairs([]);
@@ -476,14 +450,23 @@ export default function StudyArea() {
         // 否则剩下的批次还会继续发请求，白烧 token
         return () => {
             runId.current++;
+            abortRef.current?.abort();
         };
         // 依赖里不放 name / active?.model：换服务或换模型不自动重译，
         // 只把重译按钮变色提醒，避免用户没注意时白花 token
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sourceText, sourceLanguage, targetLanguage]);
+    }, [sourceText, sourceLanguage, targetLanguage, sourceLanguage === 'auto' ? secondLanguage : null]);
 
     const serviceLabel = active?.name || '-';
     const modelLabel = active?.model || '';
+    const unfinished = [];
+    pairs.forEach((pair, index) => {
+        if (pair.error || !pair.dst) unfinished.push(index);
+    });
+    const resultModels = [
+        ...new Set(pairs.filter((pair) => pair.dst && pair.resultModel).map((pair) => pair.resultModel)),
+    ];
+    const mixedModels = resultModels.length > 1;
 
     // 选中某个服务下的模型：服务和模型各只有一份配置，设置页会同步看到
     const pickModelOf = (sid, m) => {
@@ -572,7 +555,7 @@ export default function StudyArea() {
                 shadow='none'
                 className='bg-content1 rounded-[14px]'
             >
-                <CardHeader className='flex justify-between pl-0 pr-2 pt-2.5 pb-1 bg-content1 rounded-t-[14px]'>
+                <CardHeader className='flex flex-wrap justify-between gap-1 pl-0 pr-2 pt-2.5 pb-1 bg-content1 rounded-t-[14px]'>
                     <div className='flex items-center gap-2 pl-2 text-[13px] text-default-500 min-w-0'>
                         {hasChoice ? (
                             <Popover
@@ -717,6 +700,31 @@ export default function StudyArea() {
                         )}
                     </div>
                     <div className='flex items-center gap-1 shrink-0'>
+                        {isLoading && (
+                            <Button
+                                size='sm'
+                                variant='flat'
+                                className='rounded-full'
+                                onPress={stopTranslate}
+                            >
+                                {t('translate.study_stop')}
+                            </Button>
+                        )}
+                        {!isLoading && unfinished.length > 0 && (
+                            <Button
+                                size='sm'
+                                variant='flat'
+                                className='rounded-full'
+                                onPress={() =>
+                                    runTranslate(
+                                        pairsRef.current.map((pair) => pair.src),
+                                        { force: true, indices: unfinished }
+                                    )
+                                }
+                            >
+                                {t('translate.study_retry_incomplete', { n: unfinished.length })}
+                            </Button>
+                        )}
                         {/* 复制/导出的内容形态：切换后立即影响下一次复制与保存 */}
                         <div className='flex items-center rounded-full bg-default-100 p-[2px] text-[11px] shrink-0 mr-0.5'>
                             <button
@@ -750,6 +758,7 @@ export default function StudyArea() {
                                 variant='light'
                                 size='sm'
                                 className='rounded-full'
+                                aria-label={t('translate.copy')}
                                 onPress={handleCopy}
                             >
                                 {copied ? (
@@ -771,6 +780,7 @@ export default function StudyArea() {
                                 variant='light'
                                 size='sm'
                                 className='rounded-full'
+                                aria-label={t('common.save')}
                                 onPress={handleSave}
                             >
                                 <LuDownload className='text-[15px]' />
@@ -791,6 +801,8 @@ export default function StudyArea() {
                                 color={modelChanged ? 'primary' : 'default'}
                                 size='sm'
                                 className='rounded-full'
+                                isDisabled={isLoading}
+                                aria-label={t('translate.study_retranslate_all')}
                                 onPress={() => {
                                     const sentences = pairs.map((p) => p.src);
                                     if (sentences.length) runTranslate(sentences, { force: true });
@@ -802,9 +814,14 @@ export default function StudyArea() {
                     </div>
                 </CardHeader>
                 <CardBody className='bg-content1 px-3 pt-2 pb-0.5'>
-                    {error ? (
-                        <div className='text-[13px] text-danger py-2 break-all'>{error}</div>
-                    ) : studyList.length === 0 ? (
+                    {(modelChanged || mixedModels) && resultModels.length > 0 && (
+                        <p className='mb-2 text-[12px] text-default-500 break-words'>
+                            {mixedModels
+                                ? t('translate.study_mixed_models')
+                                : t('translate.study_result_from', { name: resultModels[0] })}
+                        </p>
+                    )}
+                    {studyList.length === 0 ? (
                         <div className='flex items-center justify-between gap-2 py-2'>
                             <span className='text-[13px] text-default-400'>{t('translate.study_no_service')}</span>
                             <Button
@@ -832,25 +849,124 @@ export default function StudyArea() {
                                     }`}
                                 >
                                     <div
+                                        className='mb-1 flex flex-wrap items-center justify-end gap-1 text-[12px]'
+                                        onClick={(event) => event.stopPropagation()}
+                                    >
+                                        {mixedModels && p.resultModel && (
+                                            <span className='mr-auto text-default-400'>{p.resultModel}</span>
+                                        )}
+                                        <Button
+                                            size='sm'
+                                            variant='light'
+                                            className='h-6 min-w-0 px-2'
+                                            isDisabled={isLoading}
+                                            onPress={() =>
+                                                runTranslate(
+                                                    pairsRef.current.map((pair) => pair.src),
+                                                    { force: true, indices: [i] }
+                                                )
+                                            }
+                                        >
+                                            {t('translate.study_retry_sentence')}
+                                        </Button>
+                                        {i + 1 < pairs.length && (
+                                            <Button
+                                                size='sm'
+                                                variant='light'
+                                                className='h-6 min-w-0 px-2'
+                                                isDisabled={isLoading}
+                                                onPress={() =>
+                                                    applySentenceEdit(i, 2, [`${p.src} ${pairs[i + 1].src}`])
+                                                }
+                                            >
+                                                {t('translate.study_merge_next')}
+                                            </Button>
+                                        )}
+                                        <Button
+                                            size='sm'
+                                            variant='light'
+                                            className='h-6 min-w-0 px-2'
+                                            isDisabled={isLoading}
+                                            onPress={() => {
+                                                setEditingIndex(i);
+                                                setEditDraft(p.src);
+                                            }}
+                                        >
+                                            {t('translate.study_edit_sentences')}
+                                        </Button>
+                                    </div>
+                                    <div
                                         className='text-default-700 leading-[1.65]'
                                         style={{ fontSize: `${appFontSize}px` }}
                                     >
                                         {p.src}
                                     </div>
                                     <div
-                                        className={`leading-[1.65] mt-1 ${
+                                        className={`leading-[1.65] mt-1 whitespace-pre-wrap ${
                                             p.error ? 'text-danger' : 'text-default-500'
                                         }`}
                                         style={{ fontSize: `${appFontSize}px` }}
                                     >
-                                        {p.error ? formatStudyError(p.error) : p.dst || (isLoading ? '…' : '')}
+                                        {p.error
+                                            ? formatStudyError(p.error)
+                                            : p.dst || (p.pending ? '…' : t('translate.study_waiting'))}
                                     </div>
+                                    {p.error && p.dst && (
+                                        <div
+                                            className='mt-1 whitespace-pre-wrap text-default-500 leading-[1.65]'
+                                            style={{ fontSize: `${appFontSize}px` }}
+                                        >
+                                            {p.dst}
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
                     )}
                 </CardBody>
             </Card>
+            <Modal
+                isOpen={editingIndex !== null}
+                onOpenChange={(open) => {
+                    if (!open) setEditingIndex(null);
+                }}
+            >
+                <ModalContent>
+                    <ModalHeader>{t('translate.study_edit_sentences')}</ModalHeader>
+                    <ModalBody>
+                        <Textarea
+                            value={editDraft}
+                            onValueChange={setEditDraft}
+                            minRows={4}
+                            aria-label={t('translate.study_edit_sentences')}
+                            description={t('translate.study_edit_hint')}
+                        />
+                    </ModalBody>
+                    <ModalFooter>
+                        <Button
+                            variant='light'
+                            onPress={() => setEditingIndex(null)}
+                        >
+                            {t('common.cancel')}
+                        </Button>
+                        <Button
+                            color='primary'
+                            isDisabled={!editDraft.trim()}
+                            onPress={() => {
+                                const sentences = editDraft
+                                    .split(/\r?\n/)
+                                    .map((text) => text.trim())
+                                    .filter(Boolean);
+                                if (editingIndex !== null && sentences.length)
+                                    applySentenceEdit(editingIndex, 1, sentences);
+                                setEditingIndex(null);
+                            }}
+                        >
+                            {t('common.save')}
+                        </Button>
+                    </ModalFooter>
+                </ModalContent>
+            </Modal>
             <div className='h-[10px] shrink-0' />
         </>
     );
