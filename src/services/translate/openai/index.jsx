@@ -1,6 +1,7 @@
 import { fetch, Body } from '@tauri-apps/api/http';
 import { Language } from './info';
 import { defaultRequestArguments } from './Config';
+import { readOpenAIStream } from './stream';
 
 export async function translate(text, from, to, options) {
     const { config, setResult, detect, signal } = options;
@@ -70,78 +71,11 @@ export async function translate(text, from, to, options) {
             signal: signal,
         });
         if (res.ok) {
-            let target = '';
-            // 输出被长度限制截断时置位，收尾时要报错而不是当成功返回
-            let truncated = false;
-            const reader = res.body.getReader();
-            // 必须复用同一个 TextDecoder 并开 stream 模式：
-            // 每个网络块单独解码时，中文字符被拆到两个块会变成乱码
-            const decoder = new TextDecoder();
-            // SSE 是按行走的协议：空行分隔事件，以 ':' 开头的是注释（magpie 转发慢模型时
-            // 会先发 ': keepalive' 保活），只有 'data:' 开头的行才是负载。
-            // 旧实现用 split('data:') 切块，把注释行当成「被截断的 JSON 前半截」存进 temp，
-            // 之后每一块都拼在它后面，解析从此永久失败、译文恒为空。
-            const handleLine = (line) => {
-                const text = line.replace(/\r$/, '');
-                if (!text || text.startsWith(':')) return false;
-                if (!text.startsWith('data:')) return false;
-                const payload = text.slice(5).trim();
-                if (!payload || payload === '[DONE]') return false;
-                let result;
-                try {
-                    result = JSON.parse(payload);
-                } catch {
-                    // 单行坏数据直接丢掉，不能污染后续行
-                    return false;
-                }
-                // 流内错误：网关在上游失败时会回一个 error 对象，HTTP 状态仍是 200。
-                // 旧实现把它当“没有 delta”默默跳过，调用方会拿到空译文却以为成功。
-                if (result?.error) {
-                    const e = result.error;
-                    const msg = e.message || e.code || JSON.stringify(e);
-                    throw new Error(`stream error: ${msg}`);
-                }
-                const choice = result?.choices?.[0];
-                // 达到输出上限被截断，内容不完整，不能当成功
-                if (choice?.finish_reason === 'length') truncated = true;
-                // 结束帧的 choices 是空数组，可选链避免 TypeError
-                const delta = choice?.delta?.content;
-                if (!delta) return false;
-                target += delta;
-                if (setResult) {
-                    setResult(target + '_');
-                    return false;
-                }
-                return true;
-            };
-            try {
-                // 行缓冲：一个事件可能被拆到两个网络块，最后一段不完整的留到下一块再拼
-                let buffer = '';
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) {
-                        // 收尾：最后一段可能没有换行结尾，补解析一次再返回，
-                        // 否则丢掉的正是最后一个 token
-                        if (buffer && handleLine(buffer)) return '[STREAM]';
-                        // 被截断的结果不能交给调用方当成功
-                        if (truncated) {
-                            throw new Error('stream truncated: finish_reason=length');
-                        }
-                        setResult?.(target.trim());
-                        return target.trim();
-                    }
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() ?? '';
-                    for (const line of lines) {
-                        if (handleLine(line)) return '[STREAM]';
-                    }
-                }
-            } finally {
-                reader.releaseLock();
-            }
+            return readOpenAIStream(res, setResult);
         } else {
-            throw `Http Request Error\nHttp Status: ${res.status}\n${JSON.stringify(res.data)}`;
+            const error = new Error(`HTTP ${res.status} ${res.statusText}`);
+            error.status = res.status;
+            throw error;
         }
     } else {
         let res = await fetch(apiUrl.href, {

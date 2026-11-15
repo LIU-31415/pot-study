@@ -22,6 +22,7 @@ import { useConfig } from '../../../../hooks';
 import { sourceTextAtom, detectLanguageAtom } from '../SourceArea';
 import { sourceLanguageAtom, targetLanguageAtom } from '../LanguageArea';
 import { splitSentences } from '../../../../utils/sentence';
+import { parseNumbered, getStudyError, buildStudyMarkdown } from '../../../../utils/study';
 import { resolveActiveStudyService, fetchModelList, isLocalGatewayUrl } from '../../../../utils/study_service';
 import { defaultRequestArguments } from '../../../../services/translate/openai/Config';
 
@@ -33,21 +34,6 @@ export function shortModel(m) {
             .split('/')
             .pop() || ''
     );
-}
-
-function parseNumbered(raw) {
-    const map = new Map();
-    if (!raw) return map;
-    const text = raw.replace(/_+$/, '');
-    for (const line of text.split('\n')) {
-        const m = line.match(/^\s*(\d+)\s*[.、)]\s*(.+)$/);
-        if (m) {
-            const idx = parseInt(m[1], 10);
-            const val = m[2].trim();
-            if (val) map.set(idx, val);
-        }
-    }
-    return map;
 }
 
 const STUDY_SYSTEM =
@@ -94,6 +80,7 @@ export default function StudyArea() {
         copyModeRef.current = copyMode === 'target' ? 'target' : 'both';
     }, [copyMode]);
     const { t } = useTranslation();
+    const formatStudyError = (value) => (value.startsWith('study_') ? t(`translate.${value}`) : value);
 
     // 学习模式的服务独立配置（OpenAI 兼容格式），不再复用翻译服务列表
     const studyList = studyServices ?? [];
@@ -249,7 +236,7 @@ export default function StudyArea() {
         return tgtLang;
     };
 
-    const runTranslate = async (sentences) => {
+    const runTranslate = async (sentences, { force = false } = {}) => {
         // 上一轮还在跑就取消掉，避免旧流继续占内存
         abortRef.current?.abort();
         // 冻结这一轮的配置：翻译途中切模型不能让后续批次改用新模型，
@@ -263,7 +250,7 @@ export default function StudyArea() {
         };
         const effectiveTarget = computeTarget(sourceLanguage, targetLanguage, detectLanguage);
         const cacheKey = makeCacheKey(act, sourceText, sourceLanguage, effectiveTarget);
-        const cached = touchCache(cacheKey);
+        const cached = force ? undefined : touchCache(cacheKey);
         if (cached) {
             // 这段文字已经用这个模型翻过：直接展示，不发请求
             runId.current++;
@@ -293,7 +280,7 @@ export default function StudyArea() {
         }
         setBatchInfo(batches.length > 1 ? t('translate.study_batches', { n: batches.length }) : '');
 
-        const acc = sentences.map((s) => ({ src: s, dst: '', error: '' }));
+        const acc = sentences.map((s) => ({ src: s, dst: '', error: '', pending: true }));
         setPairs(acc.map((p) => ({ ...p })));
 
         const translateBatch = async (batch) => {
@@ -319,16 +306,16 @@ export default function StudyArea() {
                     ],
                 };
 
-                await builtinServices['openai'].translate(numbered, LanguageEnum[sourceLanguage], LanguageEnum[to], {
+                const output = await builtinServices['openai'].translate(numbered, LanguageEnum[sourceLanguage], LanguageEnum[to], {
                     config: cfg,
                     detect: detectLanguage,
                     signal: controller.signal,
                     setResult: (v) => {
                         if (runId.current !== id) return;
-                        const map = parseNumbered(v);
+                        const parsed = parseNumbered(v.replace(/_$/, ''), items.length);
                         items.forEach((s, i) => {
                             const gi = batch.start + i;
-                            acc[gi].dst = map.get(i + 1) || '';
+                            acc[gi].dst = parsed[i].dst;
                             acc[gi].error = '';
                         });
                         // 节流：流式碎片来得很快，每 120ms 最多重渲一次
@@ -338,12 +325,12 @@ export default function StudyArea() {
                         setPairs(acc.map((p) => ({ ...p })));
                     },
                 });
-                // 本批结束：没拿到译文的句子按失败处理。
-                // 上游用流内 error 事件或截断收尾时，解析会得到空译文且不报错，
-                // 不拦的话空白结果会被当成成功写进缓存，重译也命中它。
+                const parsed = parseNumbered(output, items.length);
                 items.forEach((s, i) => {
                     const gi = batch.start + i;
-                    if (!acc[gi].dst) acc[gi].error = t('translate.study_failed');
+                    acc[gi].dst = parsed[i].dst;
+                    acc[gi].error = parsed[i].error;
+                    acc[gi].pending = false;
                 });
                 // 本批结束，强制渲染一次，避免节流漏掉最后一段
                 if (runId.current === id) {
@@ -353,7 +340,8 @@ export default function StudyArea() {
             } catch (e) {
                 if (runId.current !== id) return;
                 for (let i = 0; i < batch.count; i++) {
-                    acc[batch.start + i].error = t('translate.study_failed');
+                    acc[batch.start + i].error = getStudyError(e);
+                    acc[batch.start + i].pending = false;
                 }
                 setPairs(acc.map((p) => ({ ...p })));
                 throw e;
@@ -527,13 +515,11 @@ export default function StudyArea() {
 
     // 导出：选中了就只导选中的，没选就导全部
     const buildMarkdown = (items) => {
-        if (copyModeRef.current === 'target') {
-            return items
-                .map((p) => p.dst || '')
-                .filter(Boolean)
-                .join('\n\n');
-        }
-        return items.map((p, i) => `**${i + 1}.** ${p.src}\n\n${p.dst || ''}`).join('\n\n---\n\n');
+        return buildStudyMarkdown(
+            items.map((p) => ({ ...p, error: p.error ? formatStudyError(p.error) : '' })),
+            copyModeRef.current,
+            t('translate.study_incomplete')
+        );
     };
 
     const exportItems = () => {
@@ -807,7 +793,7 @@ export default function StudyArea() {
                                 className='rounded-full'
                                 onPress={() => {
                                     const sentences = pairs.map((p) => p.src);
-                                    if (sentences.length) runTranslate(sentences);
+                                    if (sentences.length) runTranslate(sentences, { force: true });
                                 }}
                             >
                                 <LuRefreshCw className='text-[15px]' />
@@ -857,7 +843,7 @@ export default function StudyArea() {
                                         }`}
                                         style={{ fontSize: `${appFontSize}px` }}
                                     >
-                                        {p.error || p.dst || (isLoading ? '…' : '')}
+                                        {p.error ? formatStudyError(p.error) : p.dst || (isLoading ? '…' : '')}
                                     </div>
                                 </div>
                             ))}

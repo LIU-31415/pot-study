@@ -1,0 +1,58 @@
+export function parseNumbered(raw, count) {
+    const result = Array.from({ length: count }, () => ({ dst: '', error: 'study_missing_number' }));
+    const seen = new Set();
+    let current = -1;
+    let unexpected = false;
+    for (const line of String(raw ?? '').split('\n')) {
+        if (/^\s*```/.test(line)) continue;
+        const match = line.match(/^\s*(?:\*\*)?(\d+)\s*[.、)](?:\*\*)?\s*(.*)$/);
+        if (match) {
+            const index = Number(match[1]) - 1;
+            current = -1;
+            if (index < 0 || index >= count) {
+                unexpected = true;
+                continue;
+            }
+            if (seen.has(index)) {
+                result[index].error = 'study_duplicate_number';
+                continue;
+            }
+            seen.add(index);
+            current = index;
+            result[index] = { dst: match[2].trim(), error: '' };
+        } else if (current >= 0 && line.trim()) {
+            result[current].dst += (result[current].dst ? '\n' : '') + line.trim();
+        }
+    }
+    for (const item of result) {
+        if (unexpected) item.error = 'study_unexpected_number';
+        else if (!item.dst && !item.error) item.error = 'study_missing_number';
+    }
+    return result;
+}
+
+export function getStudyError(error) {
+    if (error?.name === 'AbortError') return 'study_stopped';
+    if (typeof error?.code === 'string' && error.code.startsWith('study_')) return error.code;
+    if (error?.status === 401 || error?.status === 403) return 'study_auth_error';
+    if (error?.status === 429) return 'study_rate_limit';
+    if (error instanceof TypeError) return 'study_network_error';
+    return error?.message || String(error);
+}
+
+export function buildStudyMarkdown(items, mode, incompleteLabel) {
+    return items
+        .map((item, index) => {
+            const incomplete = item.pending || item.error || !item.dst;
+            const status = incomplete
+                ? `> **${incompleteLabel}**${item.error ? ` · ${item.error}` : ''}\n\n`
+                : '';
+            const translation = status + (item.dst || '');
+            if (mode === 'target') {
+                return incomplete ? `${item.src}\n\n${translation}`.trim() : translation;
+            }
+            return `**${index + 1}.** ${item.src}\n\n${translation}`;
+        })
+        .filter(Boolean)
+        .join(mode === 'target' ? '\n\n' : '\n\n---\n\n');
+}
