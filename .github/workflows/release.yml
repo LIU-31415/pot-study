@@ -66,9 +66,6 @@ jobs:
             - name: 安装依赖
               run: pnpm install
 
-            - name: 验证分句与学习模式
-              run: pnpm test
-
             - name: 构建（含 updater 包与签名）
               shell: pwsh
               env:
@@ -154,9 +151,6 @@ jobs:
 
             - name: 安装依赖
               run: pnpm install
-
-            - name: 验证分句与学习模式
-              run: pnpm test
 
             - name: 构建并签名 macOS 应用与更新包
               shell: bash

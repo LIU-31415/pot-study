@@ -48,9 +48,7 @@ pub struct TranslateModeWrapper(pub Mutex<String>);
 /// 用端口而不是命名互斥量，是为了不依赖平台专有 API，Windows / macOS / Linux 走同一套逻辑。
 /// 端口选在高端不常见号段，被其他程序占用的概率极低。
 fn acquire_single_instance() -> Option<std::net::TcpListener> {
-    // 调试实例使用独立端口，便于与已安装的版本同时运行。
-    let port = if cfg!(debug_assertions) { 52135 } else { 52134 };
-    std::net::TcpListener::bind(("127.0.0.1", port)).ok()
+    std::net::TcpListener::bind(("127.0.0.1", 52134)).ok()
 }
 
 #[cfg(target_os = "windows")]
